@@ -12,7 +12,7 @@ class YAC_File_Service {
      * @param array $file
      * @return array|WP_Error
      */
-    public static function upload($file) {
+    public static function upload($file, $context = 'payment_proof') {
 
         if (empty($file)) {
             return new WP_Error(
@@ -21,27 +21,18 @@ class YAC_File_Service {
             );
         }
 
-        /**
-         * Maximum upload size: 5 MB.
-         */
-        $max_size = 5 * MB_IN_BYTES;
+        $max_size = $context === 'resource'
+            ? 50 * MB_IN_BYTES
+            : 5 * MB_IN_BYTES;
 
         if (!empty($file['size']) && $file['size'] > $max_size) {
             return new WP_Error(
                 'yac_file_too_large',
-                'File size must not exceed 5 MB.'
+                'File size must not exceed ' . size_format($max_size) . '.'
             );
         }
 
-        /**
-         * Only allow receipt/document formats.
-         */
-        $allowed_mimes = [
-            'jpg|jpeg' => 'image/jpeg',
-            'png'      => 'image/png',
-            'webp'     => 'image/webp',
-            'pdf'      => 'application/pdf',
-        ];
+        $allowed_mimes = self::allowed_mimes($context);
 
         require_once ABSPATH . 'wp-admin/includes/file.php';
 
@@ -51,6 +42,35 @@ class YAC_File_Service {
         ];
 
         return wp_handle_upload($file, $overrides);
+
+    }
+
+    private static function allowed_mimes($context) {
+
+        if ($context === 'resource') {
+            return [
+                'pdf'       => 'application/pdf',
+                'doc'       => 'application/msword',
+                'docx'      => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'ppt'       => 'application/vnd.ms-powerpoint',
+                'pptx'      => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                'xls'       => 'application/vnd.ms-excel',
+                'xlsx'      => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'jpg|jpeg'  => 'image/jpeg',
+                'png'       => 'image/png',
+                'webp'      => 'image/webp',
+                'mp4|m4v'   => 'video/mp4',
+                'mov|qt'    => 'video/quicktime',
+                'webm'      => 'video/webm',
+            ];
+        }
+
+        return [
+            'jpg|jpeg' => 'image/jpeg',
+            'png'      => 'image/png',
+            'webp'     => 'image/webp',
+            'pdf'      => 'application/pdf',
+        ];
 
     }
 

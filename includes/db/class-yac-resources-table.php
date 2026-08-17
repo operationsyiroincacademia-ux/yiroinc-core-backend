@@ -39,7 +39,11 @@ class YAC_Resources_Table {
 
             category VARCHAR(100) NULL,
 
+            source_type VARCHAR(20) NOT NULL DEFAULT 'file',
+
             file_id BIGINT UNSIGNED NULL,
+
+            external_url TEXT NULL,
 
             profile_type VARCHAR(50) NULL,
             exam_type VARCHAR(100) NULL,
@@ -52,6 +56,7 @@ class YAC_Resources_Table {
             PRIMARY KEY (id),
 
             KEY category (category),
+            KEY source_type (source_type),
             KEY profile_type (profile_type),
             KEY exam_type (exam_type),
             KEY file_id (file_id)
