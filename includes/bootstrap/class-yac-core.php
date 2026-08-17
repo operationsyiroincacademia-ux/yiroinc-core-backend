@@ -19,7 +19,7 @@ class YAC_Core {
         $this->loader = new YAC_Loader();
 
         add_action('rest_api_init', [$this, 'register_rest_routes']);
-        add_filter('rest_pre_serve_request', [$this, 'send_cors_headers'], 10, 4);
+        add_filter('rest_post_dispatch', [$this, 'add_cors_response_headers'], 10, 3);
         add_filter('rest_pre_dispatch', [$this, 'handle_cors_preflight'], 10, 3);
 
     }
@@ -115,15 +115,25 @@ class YAC_Core {
 
     }
 
-    public function send_cors_headers($served, $result, $request, $server) {
+    public function add_cors_response_headers($response, $server, $request) {
 
         if (!$this->is_yac_rest_request($request)) {
-            return $served;
+            return $response;
         }
 
-        $this->send_allowed_cors_headers();
+        $origin = $this->allowed_cors_origin();
 
-        return $served;
+        if (!$origin) {
+            return $response;
+        }
+
+        $response->header('Vary', 'Origin', false);
+        $response->header('Access-Control-Allow-Origin', $origin);
+        $response->header('Access-Control-Allow-Methods', $this->allowed_cors_methods());
+        $response->header('Access-Control-Allow-Headers', $this->allowed_cors_headers());
+        $response->header('Access-Control-Max-Age', '600');
+
+        return $response;
 
     }
 
@@ -155,17 +165,41 @@ class YAC_Core {
 
     private function send_allowed_cors_headers() {
 
-        $origin = get_http_origin();
+        $origin = $this->allowed_cors_origin();
 
-        if (!$origin || !in_array($origin, $this->allowed_cors_origins(), true)) {
+        if (!$origin) {
             return;
         }
 
         header('Vary: Origin', false);
         header('Access-Control-Allow-Origin: ' . $origin);
-        header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-        header('Access-Control-Allow-Headers: Authorization, Content-Type, X-WP-Nonce');
+        header('Access-Control-Allow-Methods: ' . $this->allowed_cors_methods());
+        header('Access-Control-Allow-Headers: ' . $this->allowed_cors_headers());
         header('Access-Control-Max-Age: 600');
+
+    }
+
+    private function allowed_cors_origin() {
+
+        $origin = get_http_origin();
+
+        if (!$origin || !in_array($origin, $this->allowed_cors_origins(), true)) {
+            return false;
+        }
+
+        return $origin;
+
+    }
+
+    private function allowed_cors_methods() {
+
+        return 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
+
+    }
+
+    private function allowed_cors_headers() {
+
+        return 'Authorization, Content-Type, X-WP-Nonce';
 
     }
 
