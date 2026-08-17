@@ -141,7 +141,24 @@ class YAC_Procurements_Controller extends YAC_REST_Controller {
         if (is_wp_error($validation)) {
             return $validation;
         }
-        
+
+        $data['order_id'] = (int) $data['order_id'];
+
+        if ($data['order_id'] < 1) {
+            return $this->error('order_id must be a positive integer.', 400);
+        }
+
+        $data['procurement_reference'] = sanitize_text_field($data['procurement_reference']);
+        $data['expected_delivery_date'] = isset($data['expected_delivery_date'])
+            ? sanitize_text_field($data['expected_delivery_date'])
+            : null;
+
+        $validation = YAC_Validation_Service::required($data, 'procurement_reference');
+
+        if (is_wp_error($validation)) {
+            return $validation;
+        }
+
         $order = $wpdb->get_row(
             $wpdb->prepare(
                 "SELECT id
@@ -180,11 +197,7 @@ class YAC_Procurements_Controller extends YAC_REST_Controller {
                 'order_id'               => $data['order_id'],
                 'user_id'                => $data['user_id'],
                 'procurement_reference'  => $data['procurement_reference'],
-                'supplier_name'          => $data['supplier_name'] ?? null,
-                'tracking_number'        => $data['tracking_number'] ?? null,
-                'courier'                => $data['courier'] ?? null,
                 'expected_delivery_date' => $data['expected_delivery_date'] ?? null,
-                'admin_note'             => $data['admin_note'] ?? null,
             ]
         );
 
@@ -226,6 +239,7 @@ class YAC_Procurements_Controller extends YAC_REST_Controller {
         }
         
         $status = $request->get_param('status');
+        $status = $status !== null ? sanitize_text_field($status) : null;
         
         $page = max(1, (int) ($request->get_param('page') ?: 1));
         $per_page = max(1, (int) ($request->get_param('per_page') ?: 20));
@@ -240,20 +254,29 @@ class YAC_Procurements_Controller extends YAC_REST_Controller {
             return $this->error('Unauthorized.', 401);
         }
         
-        $where = ["user_id = %d"];
-        $params = [$user_id];
+        $is_admin = user_can($user_id, 'manage_options');
+
+        $where = [];
+        $params = [];
+
+        if (!$is_admin) {
+            $where[] = "user_id = %d";
+            $params[] = $user_id;
+        }
         
         if (!empty($status)) {
             $where[] = "status = %s";
             $params[] = $status;
         }
         
-        $where_sql = implode(' AND ', $where);
+        $where_sql = !empty($where)
+            ? 'WHERE ' . implode(' AND ', $where)
+            : '';
         
         $query = "
             SELECT *
             FROM " . YAC_Procurements_Table::table_name() . "
-            WHERE {$where_sql}
+            {$where_sql}
             ORDER BY {$sort} {$order}
             LIMIT %d OFFSET %d
         ";
@@ -269,15 +292,13 @@ class YAC_Procurements_Controller extends YAC_REST_Controller {
         $count_query = "
             SELECT COUNT(*)
             FROM " . YAC_Procurements_Table::table_name() . "
-            WHERE {$where_sql}
+            {$where_sql}
         ";
         
-        $total = (int) $wpdb->get_var(
-            $wpdb->prepare(
-                $count_query,
-                ...array_slice($params, 0, count($params) - 2)
-            )
-        );
+        $count_params = array_slice($params, 0, count($params) - 2);
+        $total = empty($count_params)
+            ? (int) $wpdb->get_var($count_query)
+            : (int) $wpdb->get_var($wpdb->prepare($count_query, ...$count_params));
 
         return $this->success([
             'procurements' => $procurements,
@@ -303,12 +324,17 @@ class YAC_Procurements_Controller extends YAC_REST_Controller {
             return $this->error('Unauthorized.', 401);
         }
 
+        $is_admin = user_can($user_id, 'manage_options');
+        $query = "SELECT * FROM " . YAC_Procurements_Table::table_name() . " WHERE id = %d";
+        $params = [$request['id']];
+
+        if (!$is_admin) {
+            $query .= " AND user_id = %d";
+            $params[] = $user_id;
+        }
+
         $procurement = $wpdb->get_row(
-            $wpdb->prepare(
-                "SELECT * FROM " . YAC_Procurements_Table::table_name() . " WHERE id = %d AND user_id = %d",
-                $request['id'],
-                $user_id
-            ),
+            $wpdb->prepare($query, ...$params),
             ARRAY_A
         );
 

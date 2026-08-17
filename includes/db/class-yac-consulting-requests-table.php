@@ -39,7 +39,17 @@ class YAC_Consulting_Requests_Table extends YAC_Table {
 
             assigned_to BIGINT(20) UNSIGNED DEFAULT NULL,
 
+            assigned_by BIGINT(20) UNSIGNED DEFAULT NULL,
+
+            assigned_at DATETIME DEFAULT NULL,
+
+            started_by BIGINT(20) UNSIGNED DEFAULT NULL,
+
+            started_at DATETIME DEFAULT NULL,
+
             admin_note TEXT DEFAULT NULL,
+
+            completed_by BIGINT(20) UNSIGNED DEFAULT NULL,
 
             completed_at DATETIME DEFAULT NULL,
 
@@ -55,6 +65,8 @@ class YAC_Consulting_Requests_Table extends YAC_Table {
             KEY status (status),
 
             KEY assigned_to (assigned_to),
+
+            KEY assigned_by (assigned_by),
 
             KEY service_type (service_type)
 

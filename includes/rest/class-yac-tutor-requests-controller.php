@@ -135,10 +135,43 @@ class YAC_Tutor_Requests_Controller extends YAC_REST_Controller {
 
         }
 
+        $data = [
+            'user_id'            => $data['user_id'],
+            'exam_type'          => sanitize_text_field($data['exam_type']),
+            'exam_level'         => isset($data['exam_level']) ? sanitize_text_field($data['exam_level']) : null,
+            'preferred_timezone' => isset($data['preferred_timezone']) ? sanitize_text_field($data['preferred_timezone']) : null,
+            'preferred_language' => isset($data['preferred_language']) ? sanitize_text_field($data['preferred_language']) : null,
+            'additional_notes'   => isset($data['additional_notes']) ? sanitize_textarea_field($data['additional_notes']) : null,
+        ];
+
+        $validation = YAC_Validation_Service::required($data, 'exam_type');
+
+        if (is_wp_error($validation)) {
+            return $validation;
+        }
+
         $validation = YAC_Validation_Service::max_length($data['exam_type'], 100);
 
         if (is_wp_error($validation)) {
             return $validation;
+        }
+
+        foreach (['exam_level', 'preferred_timezone', 'preferred_language'] as $field) {
+            if ($data[$field] !== null) {
+                $validation = YAC_Validation_Service::max_length($data[$field], 100);
+
+                if (is_wp_error($validation)) {
+                    return $validation;
+                }
+            }
+        }
+
+        if ($data['additional_notes'] !== null) {
+            $validation = YAC_Validation_Service::max_length($data['additional_notes'], 2000);
+
+            if (is_wp_error($validation)) {
+                return $validation;
+            }
         }
 
         $inserted = $wpdb->insert(
@@ -175,7 +208,11 @@ class YAC_Tutor_Requests_Controller extends YAC_REST_Controller {
         $allowed_sort_columns = [
             'created_at',
             'status',
-            'expected_delivery_date',
+            'exam_type',
+            'exam_level',
+            'matched_at',
+            'completed_at',
+            'updated_at',
         ];
         
         $sort = $request->get_param('sort') ?: 'created_at';
@@ -191,6 +228,7 @@ class YAC_Tutor_Requests_Controller extends YAC_REST_Controller {
         }
         
         $status = $request->get_param('status');
+        $status = $status !== null ? sanitize_text_field($status) : null;
         
         $page = max(1, (int) ($request->get_param('page') ?: 1));
         $per_page = max(1, (int) ($request->get_param('per_page') ?: 20));
@@ -246,12 +284,10 @@ class YAC_Tutor_Requests_Controller extends YAC_REST_Controller {
             {$where_sql}
         ";
         
-        $total = (int) $wpdb->get_var(
-            $wpdb->prepare(
-                $count_query,
-                ...array_slice($params, 0, count($params) - 2)
-            )
-        );
+        $count_params = array_slice($params, 0, count($params) - 2);
+        $total = empty($count_params)
+            ? (int) $wpdb->get_var($count_query)
+            : (int) $wpdb->get_var($wpdb->prepare($count_query, ...$count_params));
 
         return $this->success([
             'requests' => $requests,
@@ -277,12 +313,17 @@ class YAC_Tutor_Requests_Controller extends YAC_REST_Controller {
             return $this->error('Unauthorized.', 401);
         }
 
+        $is_admin = user_can($user_id, 'manage_options');
+        $query = "SELECT * FROM " . YAC_Tutor_Requests_Table::table_name() . " WHERE id = %d";
+        $params = [$request['id']];
+
+        if (!$is_admin) {
+            $query .= " AND user_id = %d";
+            $params[] = $user_id;
+        }
+
         $tutor_request = $wpdb->get_row(
-            $wpdb->prepare(
-                "SELECT * FROM " . YAC_Tutor_Requests_Table::table_name() . " WHERE id = %d AND user_id = %d",
-                $request['id'],
-                $user_id
-            ),
+            $wpdb->prepare($query, ...$params),
             ARRAY_A
         );
 
@@ -317,13 +358,25 @@ class YAC_Tutor_Requests_Controller extends YAC_REST_Controller {
             return $validation;
         }
 
+        $validation = YAC_Validation_Service::numeric($data['assigned_tutor_id']);
+
+        if (is_wp_error($validation)) {
+            return $validation;
+        }
+
+        $assigned_tutor_id = (int) $data['assigned_tutor_id'];
+
+        if ($assigned_tutor_id < 1 || !get_user_by('id', $assigned_tutor_id)) {
+            return $this->error('assigned_tutor_id must be a valid user ID.', 400);
+        }
+
         $admin_id = YAC_Auth_Helper::user_id();
 
         $updated = $wpdb->update(
             YAC_Tutor_Requests_Table::table_name(),
             [
                 'status'             => 'matched',
-                'assigned_tutor_id'  => $data['assigned_tutor_id'],
+                'assigned_tutor_id'  => $assigned_tutor_id,
                 'matched_by'         => $admin_id,
                 'matched_at'         => current_time('mysql'),
             ],

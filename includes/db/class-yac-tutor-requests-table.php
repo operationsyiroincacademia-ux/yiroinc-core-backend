@@ -33,7 +33,15 @@ class YAC_Tutor_Requests_Table extends YAC_Table {
 
             assigned_tutor_id BIGINT(20) UNSIGNED DEFAULT NULL,
 
+            matched_by BIGINT(20) UNSIGNED DEFAULT NULL,
+
             matched_at DATETIME DEFAULT NULL,
+
+            session_started_by BIGINT(20) UNSIGNED DEFAULT NULL,
+
+            session_started_at DATETIME DEFAULT NULL,
+
+            completed_by BIGINT(20) UNSIGNED DEFAULT NULL,
 
             completed_at DATETIME DEFAULT NULL,
 
@@ -49,6 +57,8 @@ class YAC_Tutor_Requests_Table extends YAC_Table {
             KEY status (status),
 
             KEY assigned_tutor_id (assigned_tutor_id),
+
+            KEY matched_by (matched_by),
 
             KEY exam_type (exam_type)
 

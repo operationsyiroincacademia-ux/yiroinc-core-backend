@@ -147,7 +147,52 @@ class YAC_Consulting_Requests_Controller extends YAC_REST_Controller {
 
         }
 
+        $data = [
+            'user_id'           => $data['user_id'],
+            'service_type'      => sanitize_text_field($data['service_type']),
+            'organization_name' => isset($data['organization_name']) ? sanitize_text_field($data['organization_name']) : null,
+            'contact_person'    => sanitize_text_field($data['contact_person']),
+            'contact_email'     => sanitize_email($data['contact_email']),
+            'contact_phone'     => isset($data['contact_phone']) ? sanitize_text_field($data['contact_phone']) : null,
+            'project_summary'   => sanitize_textarea_field($data['project_summary']),
+            'budget'            => isset($data['budget']) ? $data['budget'] : null,
+            'preferred_date'    => isset($data['preferred_date']) ? sanitize_text_field($data['preferred_date']) : null,
+        ];
+
+        foreach ($required as $field) {
+
+            $validation = YAC_Validation_Service::required($data, $field);
+
+            if (is_wp_error($validation)) {
+                return $validation;
+            }
+
+        }
+
         $validation = YAC_Validation_Service::email($data['contact_email']);
+
+        if (is_wp_error($validation)) {
+            return $validation;
+        }
+
+        foreach (
+            [
+                'service_type'      => 100,
+                'organization_name' => 255,
+                'contact_email'     => 255,
+                'contact_phone'     => 50,
+            ] as $field => $length
+        ) {
+            if ($data[$field] !== null) {
+                $validation = YAC_Validation_Service::max_length($data[$field], $length);
+
+                if (is_wp_error($validation)) {
+                    return $validation;
+                }
+            }
+        }
+
+        $validation = YAC_Validation_Service::max_length($data['project_summary'], 5000);
 
         if (is_wp_error($validation)) {
             return $validation;
@@ -216,7 +261,10 @@ class YAC_Consulting_Requests_Controller extends YAC_REST_Controller {
         $allowed_sort_columns = [
             'created_at',
             'status',
-            'expected_delivery_date',
+            'service_type',
+            'preferred_date',
+            'completed_at',
+            'updated_at',
         ];
         
         $sort = $request->get_param('sort') ?: 'created_at';
@@ -232,8 +280,8 @@ class YAC_Consulting_Requests_Controller extends YAC_REST_Controller {
         }
         
         $status = $request->get_param('status');
+        $status = $status !== null ? sanitize_text_field($status) : null;
         
-        $page = max(1, (int) $request->get_param('page'));
         $page = max(1, (int) ($request->get_param('page') ?: 1));
         $per_page = max(1, (int) ($request->get_param('per_page') ?: 20));
 
@@ -247,20 +295,29 @@ class YAC_Consulting_Requests_Controller extends YAC_REST_Controller {
             return $this->error('Unauthorized.', 401);
         }
 
-        $where = ["user_id = %d"];
-        $params = [$user_id];
+        $is_admin = user_can($user_id, 'manage_options');
+
+        $where = [];
+        $params = [];
+
+        if (!$is_admin) {
+            $where[] = "user_id = %d";
+            $params[] = $user_id;
+        }
         
         if (!empty($status)) {
             $where[] = "status = %s";
             $params[] = $status;
         }
         
-        $where_sql = implode(' AND ', $where);
+        $where_sql = !empty($where)
+            ? 'WHERE ' . implode(' AND ', $where)
+            : '';
         
         $query = "
             SELECT *
             FROM " . YAC_Consulting_Requests_Table::table_name() . "
-            WHERE {$where_sql}
+            {$where_sql}
             ORDER BY {$sort} {$order}
             LIMIT %d OFFSET %d
         ";
@@ -276,15 +333,13 @@ class YAC_Consulting_Requests_Controller extends YAC_REST_Controller {
         $count_query = "
             SELECT COUNT(*)
             FROM " . YAC_Consulting_Requests_Table::table_name() . "
-            WHERE {$where_sql}
+            {$where_sql}
         ";
         
-        $total = (int) $wpdb->get_var(
-            $wpdb->prepare(
-                $count_query,
-                ...array_slice($params, 0, count($params) - 2)
-            )
-        );
+        $count_params = array_slice($params, 0, count($params) - 2);
+        $total = empty($count_params)
+            ? (int) $wpdb->get_var($count_query)
+            : (int) $wpdb->get_var($wpdb->prepare($count_query, ...$count_params));
         
         return $this->success([
             'requests' => $requests,
@@ -309,12 +364,17 @@ class YAC_Consulting_Requests_Controller extends YAC_REST_Controller {
             return $this->error('Unauthorized.', 401);
         }
 
+        $is_admin = user_can($user_id, 'manage_options');
+        $query = "SELECT * FROM " . YAC_Consulting_Requests_Table::table_name() . " WHERE id = %d";
+        $params = [$request['id']];
+
+        if (!$is_admin) {
+            $query .= " AND user_id = %d";
+            $params[] = $user_id;
+        }
+
         $consulting_request = $wpdb->get_row(
-            $wpdb->prepare(
-                "SELECT * FROM " . YAC_Consulting_Requests_Table::table_name() . " WHERE id = %d AND user_id = %d",
-                $request['id'],
-                $user_id
-            ),
+            $wpdb->prepare($query, ...$params),
             ARRAY_A
         );
 
@@ -349,13 +409,25 @@ class YAC_Consulting_Requests_Controller extends YAC_REST_Controller {
             return $validation;
         }
 
+        $validation = YAC_Validation_Service::numeric($data['assigned_to']);
+
+        if (is_wp_error($validation)) {
+            return $validation;
+        }
+
+        $assigned_to = (int) $data['assigned_to'];
+
+        if ($assigned_to < 1 || !get_user_by('id', $assigned_to)) {
+            return $this->error('assigned_to must be a valid user ID.', 400);
+        }
+
         $admin_id = YAC_Auth_Helper::user_id();
 
         $updated = $wpdb->update(
             YAC_Consulting_Requests_Table::table_name(),
             [
                 'status'      => 'assigned',
-                'assigned_to' => $data['assigned_to'],
+                'assigned_to' => $assigned_to,
                 'assigned_by' => $admin_id,
                 'assigned_at' => current_time('mysql'),
             ],

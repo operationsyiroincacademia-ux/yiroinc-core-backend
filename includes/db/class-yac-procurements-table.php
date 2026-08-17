@@ -33,6 +33,16 @@ class YAC_Procurements_Table extends YAC_Table {
 
             expected_delivery_date DATETIME DEFAULT NULL,
 
+            ordered_by BIGINT(20) UNSIGNED DEFAULT NULL,
+
+            ordered_at DATETIME DEFAULT NULL,
+
+            shipped_by BIGINT(20) UNSIGNED DEFAULT NULL,
+
+            shipped_at DATETIME DEFAULT NULL,
+
+            delivered_by BIGINT(20) UNSIGNED DEFAULT NULL,
+
             delivered_at DATETIME DEFAULT NULL,
 
             admin_note TEXT DEFAULT NULL,
@@ -50,7 +60,13 @@ class YAC_Procurements_Table extends YAC_Table {
 
             KEY user_id (user_id),
 
-            KEY status (status)
+            KEY status (status),
+
+            KEY ordered_by (ordered_by),
+
+            KEY shipped_by (shipped_by),
+
+            KEY delivered_by (delivered_by)
 
         ) {$charset_collate};";
 
