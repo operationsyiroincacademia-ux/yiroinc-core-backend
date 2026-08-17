@@ -124,8 +124,8 @@ class YAC_Notifications_Controller extends YAC_REST_Controller {
         
         $allowed_sort_columns = [
             'created_at',
-            'status',
-            'expected_delivery_date',
+            'type',
+            'is_read',
         ];
         
         $sort = $request->get_param('sort') ?: 'created_at';
@@ -140,8 +140,6 @@ class YAC_Notifications_Controller extends YAC_REST_Controller {
             $order = 'DESC';
         }
         
-        $status = $request->get_param('status');
-
         if (!$user_id) {
             return $this->error('Unauthorized.', 401);
         }
@@ -155,13 +153,11 @@ class YAC_Notifications_Controller extends YAC_REST_Controller {
 
         $offset = ($page - 1) * $per_page;
         
-        $where = ["user_id = %d"];
+        $where = [
+            "user_id = %d",
+            "is_dismissed = 0",
+        ];
         $params = [$user_id];
-        
-        if (!empty($status)) {
-            $where[] = "status = %s";
-            $params[] = $status;
-        }
         
         $where_sql = implode(' AND ', $where);
         
@@ -313,6 +309,25 @@ class YAC_Notifications_Controller extends YAC_REST_Controller {
         global $wpdb;
         
         $user_id = YAC_Auth_Helper::user_id();
+
+        if (!$user_id) {
+            return $this->error('Unauthorized.', 401);
+        }
+
+        $notification = $this->get_user_notification(
+            $request['id'],
+            $user_id
+        );
+
+        if (!$notification) {
+            return $this->error('Notification not found.', 404);
+        }
+
+        if ((int) $notification['is_read'] === 1) {
+            return $this->success([
+                'message' => 'Notification marked as read.',
+            ]);
+        }
         
         $updated = $wpdb->update(
             YAC_Notifications_Table::table_name(),
@@ -345,6 +360,25 @@ class YAC_Notifications_Controller extends YAC_REST_Controller {
         
         $user_id = YAC_Auth_Helper::user_id();
 
+        if (!$user_id) {
+            return $this->error('Unauthorized.', 401);
+        }
+
+        $notification = $this->get_user_notification(
+            $request['id'],
+            $user_id
+        );
+
+        if (!$notification) {
+            return $this->error('Notification not found.', 404);
+        }
+
+        if ((int) $notification['is_dismissed'] === 1) {
+            return $this->success([
+                'message' => 'Notification dismissed.',
+            ]);
+        }
+
         $updated = $wpdb->update(
             YAC_Notifications_Table::table_name(),
             [
@@ -363,6 +397,24 @@ class YAC_Notifications_Controller extends YAC_REST_Controller {
         return $this->success([
             'message' => 'Notification dismissed.',
         ]);
+
+    }
+
+    private function get_user_notification($notification_id, $user_id) {
+
+        global $wpdb;
+
+        return $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT *
+                 FROM " . YAC_Notifications_Table::table_name() . "
+                 WHERE id = %d
+                 AND user_id = %d",
+                $notification_id,
+                $user_id
+            ),
+            ARRAY_A
+        );
 
     }
 
