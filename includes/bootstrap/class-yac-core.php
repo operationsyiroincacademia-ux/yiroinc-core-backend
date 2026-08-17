@@ -19,6 +19,8 @@ class YAC_Core {
         $this->loader = new YAC_Loader();
 
         add_action('rest_api_init', [$this, 'register_rest_routes']);
+        add_filter('rest_pre_serve_request', [$this, 'send_cors_headers'], 10, 4);
+        add_filter('rest_pre_dispatch', [$this, 'handle_cors_preflight'], 10, 3);
 
     }
 
@@ -110,6 +112,70 @@ class YAC_Core {
         (new YAC_Dashboard_Controller())->register_routes();
         (new YAC_Products_Controller())->register_routes();
         (new YAC_Settings_Controller())->register_routes();
+
+    }
+
+    public function send_cors_headers($served, $result, $request, $server) {
+
+        if (!$this->is_yac_rest_request($request)) {
+            return $served;
+        }
+
+        $this->send_allowed_cors_headers();
+
+        return $served;
+
+    }
+
+    public function handle_cors_preflight($result, $server, $request) {
+
+        if ($request->get_method() !== 'OPTIONS') {
+            return $result;
+        }
+
+        if (!$this->is_yac_rest_request($request)) {
+            return $result;
+        }
+
+        $this->send_allowed_cors_headers();
+
+        return new WP_REST_Response(null, 200);
+
+    }
+
+    private function is_yac_rest_request($request) {
+
+        if (!$request instanceof WP_REST_Request) {
+            return false;
+        }
+
+        return strpos($request->get_route(), '/yac/v1/') === 0;
+
+    }
+
+    private function send_allowed_cors_headers() {
+
+        $origin = get_http_origin();
+
+        if (!$origin || !in_array($origin, $this->allowed_cors_origins(), true)) {
+            return;
+        }
+
+        header('Vary: Origin', false);
+        header('Access-Control-Allow-Origin: ' . $origin);
+        header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+        header('Access-Control-Allow-Headers: Authorization, Content-Type, X-WP-Nonce');
+        header('Access-Control-Max-Age: 600');
+
+    }
+
+    private function allowed_cors_origins() {
+
+        return [
+            'http://localhost:8080',
+            'https://yiroincacademia.com',
+            'https://www.yiroincacademia.com',
+        ];
 
     }
 
