@@ -25,6 +25,8 @@ class YAC_Profiles_Table extends YAC_Table {
 
             profile_type VARCHAR(50) NOT NULL,
 
+            phone VARCHAR(50) DEFAULT NULL,
+
             organization_name VARCHAR(255) DEFAULT NULL,
 
             exam_type VARCHAR(100) DEFAULT NULL,

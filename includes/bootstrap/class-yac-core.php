@@ -12,6 +12,10 @@ class YAC_Core {
 
         $this->load_dependencies();
 
+        if (class_exists('YAC_Database')) {
+            YAC_Database::maybe_upgrade();
+        }
+
         $this->loader = new YAC_Loader();
 
         add_action('rest_api_init', [$this, 'register_rest_routes']);
@@ -28,6 +32,7 @@ class YAC_Core {
         /*
          * Database table classes
          */
+        require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-database.php';
         require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-table-registry.php';
 
         /*

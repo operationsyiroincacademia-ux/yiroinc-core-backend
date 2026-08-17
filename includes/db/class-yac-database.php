@@ -6,7 +6,7 @@ if (!defined('ABSPATH')) {
 
 class YAC_Database {
 
-    const DB_VERSION = '1.0.0';
+    const DB_VERSION = '1.0.1';
 
     public static function load() {
 
@@ -27,6 +27,14 @@ class YAC_Database {
         }
 
         update_option('yac_db_version', self::DB_VERSION);
+
+    }
+
+    public static function maybe_upgrade() {
+
+        if (version_compare(self::get_version(), self::DB_VERSION, '<')) {
+            self::install();
+        }
 
     }
 
