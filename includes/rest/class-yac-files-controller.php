@@ -398,6 +398,10 @@ class YAC_Files_Controller extends YAC_REST_Controller {
             );
         }
 
+        if (class_exists('YAC_Core')) {
+            YAC_Core::send_allowed_cors_headers();
+        }
+
         header('Content-Type: ' . $file['mime_type']);
 
         header(

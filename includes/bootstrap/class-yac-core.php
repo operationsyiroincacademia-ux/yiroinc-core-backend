@@ -121,7 +121,7 @@ class YAC_Core {
             return $response;
         }
 
-        $origin = $this->allowed_cors_origin();
+        $origin = self::allowed_cors_origin();
 
         if (!$origin) {
             return $response;
@@ -129,8 +129,8 @@ class YAC_Core {
 
         $response->header('Vary', 'Origin', false);
         $response->header('Access-Control-Allow-Origin', $origin);
-        $response->header('Access-Control-Allow-Methods', $this->allowed_cors_methods());
-        $response->header('Access-Control-Allow-Headers', $this->allowed_cors_headers());
+        $response->header('Access-Control-Allow-Methods', self::allowed_cors_methods());
+        $response->header('Access-Control-Allow-Headers', self::allowed_cors_headers());
         $response->header('Access-Control-Max-Age', '600');
 
         return $response;
@@ -147,7 +147,7 @@ class YAC_Core {
             return $result;
         }
 
-        $this->send_allowed_cors_headers();
+        self::send_allowed_cors_headers();
 
         return new WP_REST_Response(null, 200);
 
@@ -163,9 +163,9 @@ class YAC_Core {
 
     }
 
-    private function send_allowed_cors_headers() {
+    public static function send_allowed_cors_headers() {
 
-        $origin = $this->allowed_cors_origin();
+        $origin = self::allowed_cors_origin();
 
         if (!$origin) {
             return;
@@ -173,17 +173,17 @@ class YAC_Core {
 
         header('Vary: Origin', false);
         header('Access-Control-Allow-Origin: ' . $origin);
-        header('Access-Control-Allow-Methods: ' . $this->allowed_cors_methods());
-        header('Access-Control-Allow-Headers: ' . $this->allowed_cors_headers());
+        header('Access-Control-Allow-Methods: ' . self::allowed_cors_methods());
+        header('Access-Control-Allow-Headers: ' . self::allowed_cors_headers());
         header('Access-Control-Max-Age: 600');
 
     }
 
-    private function allowed_cors_origin() {
+    private static function allowed_cors_origin() {
 
         $origin = get_http_origin();
 
-        if (!$origin || !in_array($origin, $this->allowed_cors_origins(), true)) {
+        if (!$origin || !in_array($origin, self::allowed_cors_origins(), true)) {
             return false;
         }
 
@@ -191,19 +191,19 @@ class YAC_Core {
 
     }
 
-    private function allowed_cors_methods() {
+    private static function allowed_cors_methods() {
 
         return 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
 
     }
 
-    private function allowed_cors_headers() {
+    private static function allowed_cors_headers() {
 
         return 'Authorization, Content-Type, X-WP-Nonce';
 
     }
 
-    private function allowed_cors_origins() {
+    private static function allowed_cors_origins() {
 
         return [
             'http://localhost:8080',
