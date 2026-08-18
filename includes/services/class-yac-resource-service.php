@@ -147,6 +147,32 @@ class YAC_Resource_Service {
 
     }
 
+    public static function find_unrestricted($id, $user_id = null) {
+
+        global $wpdb;
+
+        $resource = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT " . self::select_sql() . "
+                 FROM " . self::table() . " r
+                 LEFT JOIN " . YAC_Files_Table::table_name() . " f
+                    ON f.id = r.file_id
+                 " . self::entitlement_join_sql($user_id) . "
+                 WHERE r.id = %d
+                 LIMIT 1",
+                (int) $id
+            ),
+            ARRAY_A
+        );
+
+        if (!$resource) {
+            return null;
+        }
+
+        return self::format($resource, $user_id);
+
+    }
+
     public static function find_file_resource($file_id, $user_id = null) {
 
         global $wpdb;
@@ -466,6 +492,38 @@ class YAC_Resource_Service {
             ];
         }
 
+        $profile_type = $profile['profile_type'];
+        $exam_type = self::profile_exam_type($profile);
+
+        if (in_array($profile_type, ['cfa_candidate', 'frm_candidate'], true)) {
+            return [
+                'sql'    => "(
+                    r.is_public = 1
+                    OR (
+                        r.profile_type = %s
+                        AND (
+                            r.exam_type IS NULL
+                            OR r.exam_type = ''
+                            OR r.exam_type = %s
+                        )
+                    )
+                    OR (
+                        r.profile_type = 'exam_candidate'
+                        AND (
+                            r.exam_type IS NULL
+                            OR r.exam_type = ''
+                            OR r.exam_type = %s
+                        )
+                    )
+                )",
+                'params' => [
+                    $profile_type,
+                    $exam_type,
+                    $exam_type,
+                ],
+            ];
+        }
+
         return [
             'sql'    => "(
                 r.is_public = 1
@@ -479,8 +537,8 @@ class YAC_Resource_Service {
                 )
             )",
             'params' => [
-                $profile['profile_type'],
-                $profile['exam_type'] ?? '',
+                $profile_type,
+                $exam_type,
             ],
         ];
 
@@ -574,14 +632,55 @@ class YAC_Resource_Service {
 
         $profile = YAC_Profile_Service::get_by_user_id($user_id);
 
-        if (!$profile || $profile['profile_type'] !== $resource['profile_type']) {
+        return self::profile_matches_resource($profile, $resource);
+
+    }
+
+    private static function profile_matches_resource($profile, $resource) {
+
+        if (!$profile || empty($resource['profile_type'])) {
             return false;
         }
 
-        return (
-            empty($resource['exam_type']) ||
-            ($profile['exam_type'] ?? '') === $resource['exam_type']
-        );
+        $profile_type = $profile['profile_type'];
+        $resource_profile_type = $resource['profile_type'];
+
+        if ($profile_type === $resource_profile_type) {
+            return self::resource_exam_matches_profile($resource, $profile);
+        }
+
+        if (
+            $resource_profile_type === 'exam_candidate' &&
+            in_array($profile_type, ['cfa_candidate', 'frm_candidate'], true)
+        ) {
+            return self::resource_exam_matches_profile($resource, $profile);
+        }
+
+        return false;
+
+    }
+
+    private static function resource_exam_matches_profile($resource, $profile) {
+
+        if (empty($resource['exam_type'])) {
+            return true;
+        }
+
+        return $resource['exam_type'] === self::profile_exam_type($profile);
+
+    }
+
+    private static function profile_exam_type($profile) {
+
+        if (($profile['profile_type'] ?? '') === 'cfa_candidate') {
+            return 'CFA';
+        }
+
+        if (($profile['profile_type'] ?? '') === 'frm_candidate') {
+            return 'FRM';
+        }
+
+        return $profile['exam_type'] ?? '';
 
     }
 

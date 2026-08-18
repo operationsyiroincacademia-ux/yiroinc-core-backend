@@ -186,7 +186,9 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             return $this->error('Unauthorized.', 401);
         }
 
-        $resource = YAC_Resource_Service::find($request['id'], $user_id);
+        $resource = user_can($user_id, 'manage_options')
+            ? YAC_Resource_Service::find_unrestricted($request['id'], $user_id)
+            : YAC_Resource_Service::find($request['id'], $user_id);
 
         if (!$resource) {
             return $this->error('Resource not found.', 404);
