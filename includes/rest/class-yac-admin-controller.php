@@ -49,6 +49,18 @@ class YAC_Admin_Controller extends YAC_REST_Controller {
 
         register_rest_route(
             $this->namespace,
+            '/admin/payments/(?P<id>\d+)',
+            [
+                [
+                    'methods'             => WP_REST_Server::READABLE,
+                    'callback'            => [$this, 'payment'],
+                    'permission_callback' => [YAC_Auth_Helper::class, 'authorize_admin'],
+                ],
+            ]
+        );
+
+        register_rest_route(
+            $this->namespace,
             '/admin/procurements',
             [
                 [
@@ -110,9 +122,33 @@ class YAC_Admin_Controller extends YAC_REST_Controller {
      */
     public function payments(WP_REST_Request $request) {
 
-        return $this->success([
-            'payments' => YAC_Admin_Service::pending_payments(),
+        $result = YAC_Admin_Service::payments([
+            'status'   => $request->get_param('status'),
+            'search'   => $request->get_param('search') ?: $request->get_param('q'),
+            'page'     => $request->get_param('page'),
+            'per_page' => $request->get_param('per_page'),
         ]);
+
+        if (is_wp_error($result)) {
+            return $this->error($result->get_error_message(), 422);
+        }
+
+        return $this->success($result);
+
+    }
+
+    /**
+     * Admin payment detail.
+     */
+    public function payment(WP_REST_Request $request) {
+
+        $result = YAC_Admin_Service::payment_detail($request['id']);
+
+        if (is_wp_error($result)) {
+            return $this->error($result->get_error_message(), 404);
+        }
+
+        return $this->success($result);
 
     }
 
