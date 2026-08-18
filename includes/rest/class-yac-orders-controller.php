@@ -290,6 +290,20 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
             return $this->error('Status is required.');
         }
 
+        $order = $this->get_order_record($request['id']);
+
+        if (!$order) {
+            return $this->error('Order not found.', 404);
+        }
+
+        if ($status === 'completed') {
+            $validation = $this->validate_digital_resource_payment($order);
+
+            if (is_wp_error($validation)) {
+                return $this->error($validation->get_error_message(), 422);
+            }
+        }
+
         $updated = $wpdb->update(
             YAC_Orders_Table::table_name(),
             [
@@ -302,6 +316,14 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
 
         if ($updated === false) {
             return $this->error('Unable to update order.');
+        }
+
+        if ($status === 'completed') {
+            $entitlement = YAC_Resource_Service::grant_entitlement_for_order($order);
+
+            if ($entitlement === false || is_wp_error($entitlement)) {
+                return $this->error('Order updated, but resource access could not be granted.', 500);
+            }
         }
 
         return $this->success([
@@ -366,6 +388,12 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
             return $this->error('Order not found.', 404);
         }
 
+        $validation = $this->validate_digital_resource_payment($order);
+
+        if (is_wp_error($validation)) {
+            return $this->error($validation->get_error_message(), 422);
+        }
+
         $updated = $wpdb->update(
             YAC_Orders_Table::table_name(),
             [
@@ -378,6 +406,12 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
 
         if ($updated === false) {
             return $this->error('Unable to fulfil order.');
+        }
+
+        $entitlement = YAC_Resource_Service::grant_entitlement_for_order($order);
+
+        if ($entitlement === false || is_wp_error($entitlement)) {
+            return $this->error('Order fulfilled, but resource access could not be granted.', 500);
         }
 
         YAC_Notification_Service::create([
@@ -393,6 +427,30 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
         return $this->success([
             'message' => 'Order fulfilled successfully.',
         ]);
+
+    }
+
+    private function validate_digital_resource_payment($order) {
+
+        $resource = YAC_Resource_Service::find_by_woo_product_id($order['woo_product_id']);
+
+        if (!$resource) {
+            return true;
+        }
+
+        $payment = YAC_Resource_Service::verified_payment_for_order(
+            $order['id'],
+            $order['user_id']
+        );
+
+        if (!$payment) {
+            return new WP_Error(
+                'yac_payment_not_verified',
+                'Cannot fulfil a digital resource order before payment is verified.'
+            );
+        }
+
+        return true;
 
     }
 

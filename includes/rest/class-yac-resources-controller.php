@@ -40,6 +40,18 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             ]
         );
 
+        register_rest_route(
+            $this->namespace,
+            '/resources/purchased',
+            [
+                [
+                    'methods'             => WP_REST_Server::READABLE,
+                    'callback'            => [$this, 'get_purchased_resources'],
+                    'permission_callback' => [YAC_Auth_Helper::class, 'authorize'],
+                ],
+            ]
+        );
+
     }
 
     /**
@@ -114,6 +126,23 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
 
     }
 
+    /**
+     * Get purchased resources.
+     */
+    public function get_purchased_resources(WP_REST_Request $request) {
+
+        $user_id = YAC_Auth_Helper::user_id();
+
+        if (!$user_id) {
+            return $this->error('Unauthorized.', 401);
+        }
+
+        return $this->success([
+            'resources' => YAC_Resource_Service::purchased($user_id),
+        ]);
+
+    }
+
     private function prepare_resource_data(array $data) {
 
         $required = [
@@ -148,6 +177,9 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             'source_type'  => $source_type,
             'file_id'      => null,
             'external_url' => null,
+            'woo_product_id' => !empty($data['woo_product_id'])
+                ? absint($data['woo_product_id'])
+                : null,
             'profile_type' => isset($data['profile_type'])
                 ? sanitize_key($data['profile_type'])
                 : null,
@@ -156,6 +188,25 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
                 : null,
             'is_public'    => !empty($data['is_public']) ? 1 : 0,
         ];
+
+        if (!empty($resource['woo_product_id'])) {
+            if (!function_exists('wc_get_product')) {
+                return $this->validation_error('WooCommerce is unavailable.', 503);
+            }
+
+            $product = wc_get_product($resource['woo_product_id']);
+
+            if (!$product || !$product->exists()) {
+                return $this->validation_error('WooCommerce product not found.', 404);
+            }
+
+            if (YAC_Resource_Service::find_by_woo_product_id($resource['woo_product_id'])) {
+                return $this->validation_error(
+                    'WooCommerce product is already mapped to a resource.',
+                    409
+                );
+            }
+        }
 
         $lengths = [
             'title'        => 255,

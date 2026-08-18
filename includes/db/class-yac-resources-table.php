@@ -45,6 +45,8 @@ class YAC_Resources_Table {
 
             external_url TEXT NULL,
 
+            woo_product_id BIGINT UNSIGNED NULL,
+
             profile_type VARCHAR(50) NULL,
             exam_type VARCHAR(100) NULL,
 
@@ -57,6 +59,7 @@ class YAC_Resources_Table {
 
             KEY category (category),
             KEY source_type (source_type),
+            UNIQUE KEY woo_product_id (woo_product_id),
             KEY profile_type (profile_type),
             KEY exam_type (exam_type),
             KEY file_id (file_id)
