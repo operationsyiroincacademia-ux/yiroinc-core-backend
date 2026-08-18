@@ -191,7 +191,16 @@ class YAC_Admin_Service {
         $where = [];
         $params = [];
 
-        if ($status === 'awaiting_verification') {
+        if ($status === 'all') {
+            $where[] = "(
+                (
+                    p.payment_status IN ('pending', 'submitted')
+                    AND p.has_pop = 1
+                )
+                OR p.payment_status = 'verified'
+                OR p.payment_status = 'rejected'
+            )";
+        } elseif ($status === 'awaiting_verification') {
             $where[] = "p.payment_status IN ('pending', 'submitted')";
             $where[] = 'p.has_pop = 1';
         } elseif ($status === 'verified') {
