@@ -129,6 +129,32 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
         if (!$order) {
             return $this->error('Order not found.', 404);
         }
+
+        $existing_payment = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT *
+                 FROM " . YAC_Payments_Table::table_name() . "
+                 WHERE order_id = %d
+                 AND user_id = %d
+                 ORDER BY created_at DESC
+                 LIMIT 1",
+                $order_id,
+                $user_id
+            ),
+            ARRAY_A
+        );
+
+        if ($existing_payment) {
+            return $this->success([
+                'payment_id'        => (int) $existing_payment['id'],
+                'order_id'          => (int) $order['id'],
+                'payment_reference' => $existing_payment['payment_reference'],
+                'amount_paid'       => (float) $existing_payment['amount_paid'],
+                'currency'          => $existing_payment['currency'],
+                'payment_status'    => $existing_payment['payment_status'],
+                'has_pop'           => (int) $existing_payment['has_pop'],
+            ]);
+        }
     
         $data = [
             'user_id'           => $user_id,
@@ -143,6 +169,24 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
         if (!$payment_id) {
             return $this->error('Unable to create payment.');
         }
+
+        $wpdb->update(
+            YAC_Orders_Table::table_name(),
+            [
+                'payment_status' => 'pending',
+            ],
+            [
+                'id'      => (int) $order['id'],
+                'user_id' => $user_id,
+            ],
+            [
+                '%s',
+            ],
+            [
+                '%d',
+                '%d',
+            ]
+        );
     
         return $this->success([
             'payment_id'        => $payment_id,
@@ -200,6 +244,12 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
         $params = [$user_id];
         
         if (!empty($status)) {
+            $status = sanitize_key($status);
+
+            if (!in_array($status, YAC_Status_Service::payment_statuses(), true)) {
+                return $this->error('Invalid payment status.', 422);
+            }
+
             $where[] = "payment_status = %s";
             $params[] = $status;
         }
@@ -313,6 +363,30 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
             return $this->error('Unable to verify payment.');
         }
 
+        $order_updated = $wpdb->update(
+            YAC_Orders_Table::table_name(),
+            [
+                'payment_status' => 'verified',
+                'order_status'   => 'processing',
+            ],
+            [
+                'id'      => (int) $payment['order_id'],
+                'user_id' => (int) $payment['user_id'],
+            ],
+            [
+                '%s',
+                '%s',
+            ],
+            [
+                '%d',
+                '%d',
+            ]
+        );
+
+        if ($order_updated === false) {
+            return $this->error('Payment verified, but order status could not be updated.', 500);
+        }
+
         /**
          * Timeline.
          */
@@ -379,6 +453,12 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
             return $validation;
         }
 
+        $rejection_reason = sanitize_textarea_field($data['rejection_reason']);
+
+        if ($rejection_reason === '') {
+            return $this->error('Rejection reason is required.', 422);
+        }
+
         $admin_id = YAC_Auth_Helper::user_id();
 
         $updated = $wpdb->update(
@@ -387,7 +467,7 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
                 'payment_status'   => 'rejected',
                 'rejected_by'      => $admin_id,
                 'rejected_at'      => current_time('mysql'),
-                'rejection_reason' => $data['rejection_reason'],
+                'rejection_reason' => $rejection_reason,
             ],
             [
                 'id' => $request['id'],
@@ -398,6 +478,30 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
             return $this->error('Unable to reject payment.');
         }
 
+        $order_updated = $wpdb->update(
+            YAC_Orders_Table::table_name(),
+            [
+                'payment_status' => 'rejected',
+                'order_status'   => 'awaiting_payment',
+            ],
+            [
+                'id'      => (int) $payment['order_id'],
+                'user_id' => (int) $payment['user_id'],
+            ],
+            [
+                '%s',
+                '%s',
+            ],
+            [
+                '%d',
+                '%d',
+            ]
+        );
+
+        if ($order_updated === false) {
+            return $this->error('Payment rejected, but order status could not be updated.', 500);
+        }
+
         /**
          * Timeline.
          */
@@ -406,7 +510,7 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
             'actor_id'     => $admin_id,
             'event'        => 'payment_rejected',
             'title'        => 'Payment Rejected',
-            'description'  => $data['rejection_reason'],
+            'description'  => $rejection_reason,
             'related_type' => 'payment',
             'related_id'   => $request['id'],
             'visibility'   => 'user',
@@ -420,7 +524,7 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
             'related_type' => 'payment',
             'related_id'   => $request['id'],
             'title'        => 'Payment Rejected',
-            'message'      => $data['rejection_reason'],
+            'message'      => $rejection_reason,
             'type'         => 'warning',
             'action_url'   => '/payments/' . $request['id'],
         ]);

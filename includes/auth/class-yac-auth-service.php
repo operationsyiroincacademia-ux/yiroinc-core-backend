@@ -36,6 +36,8 @@ class YAC_Auth_Service {
             'email'   => $user->user_email,
         ]);
 
+        $is_admin = user_can($user->ID, 'manage_options');
+
         return [
             'token' => $token,
             'user'  => [
@@ -43,10 +45,21 @@ class YAC_Auth_Service {
                 'name'          => $user->display_name,
                 'email'         => $user->user_email,
                 'registered_at' => $user->user_registered,
+                'is_admin'      => $is_admin ? 1 : 0,
+                'roles'         => array_values((array) $user->roles),
+                'capabilities'  => [
+                    'manage_options' => $is_admin ? 1 : 0,
+                ],
             ],
             'profile' => [
                 'id'           => (int) $profile['id'],
                 'profile_type' => $profile['profile_type'],
+            ],
+            'auth' => [
+                'is_admin'     => $is_admin ? 1 : 0,
+                'capabilities' => [
+                    'manage_options' => $is_admin ? 1 : 0,
+                ],
             ],
         ];
 
@@ -138,6 +151,8 @@ class YAC_Auth_Service {
             'email'   => $user->user_email,
         ]);
 
+        $is_admin = user_can($user->ID, 'manage_options');
+
         return [
             'token' => $token,
             'user'  => [
@@ -145,11 +160,22 @@ class YAC_Auth_Service {
                 'name'          => $user->display_name,
                 'email'         => $user->user_email,
                 'registered_at' => $user->user_registered,
+                'is_admin'      => $is_admin ? 1 : 0,
+                'roles'         => array_values((array) $user->roles),
+                'capabilities'  => [
+                    'manage_options' => $is_admin ? 1 : 0,
+                ],
             ],
             'profile' => [
                 'id'           => (int) $profile_id,
                 'profile_type' => $data['profile_type'],
                 'completed'    => false,
+            ],
+            'auth' => [
+                'is_admin'     => $is_admin ? 1 : 0,
+                'capabilities' => [
+                    'manage_options' => $is_admin ? 1 : 0,
+                ],
             ],
         ];
 

@@ -13,6 +13,7 @@ class YAC_Status_Service {
 
         return [
             'awaiting_payment',
+            'under_review',
             'processing',
             'completed',
             'cancelled',
@@ -43,6 +44,7 @@ class YAC_Status_Service {
             'not_started',
             'processing',
             'ready',
+            'dispatched',
             'fulfilled',
         ];
 

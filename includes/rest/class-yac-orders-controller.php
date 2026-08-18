@@ -242,6 +242,22 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
             return $this->error('Resource has already been purchased.', 409);
         }
 
+        $existing_order = YAC_Order_Service::active_resource_order($user_id, $resource_id);
+
+        if ($existing_order) {
+            return new WP_REST_Response(
+                [
+                    'success' => false,
+                    'message' => 'You already have an active order for this resource.',
+                    'data'    => [
+                        'order_id'     => (int) $existing_order['id'],
+                        'order_number' => $existing_order['order_number'],
+                    ],
+                ],
+                409
+            );
+        }
+
         $order = [
             'order_number'          => 'YAC-' . strtoupper(
                 wp_generate_password(10, false, false)
@@ -357,6 +373,12 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
 
         if (!$status) {
             return $this->error('Status is required.');
+        }
+
+        $status = sanitize_key($status);
+
+        if (!in_array($status, YAC_Status_Service::order_statuses(), true)) {
+            return $this->error('Invalid order status.', 422);
         }
 
         $order = $this->get_order_record($request['id']);

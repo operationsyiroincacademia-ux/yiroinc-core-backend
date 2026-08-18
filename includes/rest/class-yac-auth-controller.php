@@ -174,17 +174,52 @@ class YAC_Auth_Controller extends YAC_REST_Controller {
             $user['id']
         );
 
+        $is_admin = user_can($user['id'], 'manage_options');
+
         if (!$profile) {
-            return $this->error('Profile not found.', 404);
+            if (!$is_admin) {
+                return $this->error('Profile not found.', 404);
+            }
+
+            $profile = null;
         }
 
         return $this->success([
-            'user' => $user,
-            'profile' => [
-                'id'           => (int) $profile['id'],
-                'profile_type' => $profile['profile_type'],
+            'user' => array_merge(
+                $user,
+                [
+                    'is_admin'     => $is_admin ? 1 : 0,
+                    'roles'        => $this->user_roles($user['id']),
+                    'capabilities' => [
+                        'manage_options' => $is_admin ? 1 : 0,
+                    ],
+                ]
+            ),
+            'profile' => $profile
+                ? [
+                    'id'           => (int) $profile['id'],
+                    'profile_type' => $profile['profile_type'],
+                ]
+                : null,
+            'auth' => [
+                'is_admin'     => $is_admin ? 1 : 0,
+                'capabilities' => [
+                    'manage_options' => $is_admin ? 1 : 0,
+                ],
             ],
         ]);
+
+    }
+
+    private function user_roles($user_id) {
+
+        $user = get_user_by('id', $user_id);
+
+        if (!$user) {
+            return [];
+        }
+
+        return array_values((array) $user->roles);
 
     }
 
