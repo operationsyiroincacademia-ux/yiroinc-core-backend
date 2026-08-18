@@ -536,6 +536,1074 @@ class YAC_Admin_Service {
     }
 
     /**
+     * Admin orders list.
+     *
+     * @param array $args
+     * @return array|WP_Error
+     */
+    public static function orders($args = []) {
+
+        global $wpdb;
+
+        $status = !empty($args['status'])
+            ? sanitize_key($args['status'])
+            : 'all';
+
+        $allowed_statuses = array_merge(['all'], YAC_Status_Service::order_statuses());
+
+        if (!in_array($status, $allowed_statuses, true)) {
+            return new WP_Error('yac_invalid_order_filter', 'Invalid order status filter.');
+        }
+
+        $pagination = self::pagination_args($args);
+        $where = [];
+        $params = [];
+
+        if ($status !== 'all') {
+            $where[] = 'o.order_status = %s';
+            $params[] = $status;
+        }
+
+        $search = !empty($args['search'])
+            ? sanitize_text_field($args['search'])
+            : '';
+
+        if ($search !== '') {
+            $like = '%' . $wpdb->esc_like($search) . '%';
+            $where[] = '(
+                o.order_number LIKE %s
+                OR o.product_name_snapshot LIKE %s
+                OR o.sku_snapshot LIKE %s
+                OR u.display_name LIKE %s
+                OR u.user_email LIKE %s
+                OR CAST(o.id AS CHAR) LIKE %s
+            )';
+            $params = array_merge($params, [$like, $like, $like, $like, $like, $like]);
+        }
+
+        $where_sql = !empty($where)
+            ? 'WHERE ' . implode(' AND ', $where)
+            : '';
+
+        $orders_table   = YAC_Orders_Table::table_name();
+        $payments_table = YAC_Payments_Table::table_name();
+
+        $from_sql = "
+            FROM {$orders_table} o
+            LEFT JOIN {$wpdb->users} u
+                ON u.ID = o.user_id
+            LEFT JOIN {$payments_table} p
+                ON p.id = (
+                    SELECT p2.id
+                    FROM {$payments_table} p2
+                    WHERE p2.order_id = o.id
+                    AND p2.user_id = o.user_id
+                    ORDER BY p2.created_at DESC, p2.id DESC
+                    LIMIT 1
+                )
+        ";
+
+        $query = "
+            SELECT
+                o.id,
+                o.order_number,
+                o.user_id,
+                o.order_source,
+                o.woo_product_id,
+                o.woo_variation_id,
+                o.resource_id,
+                o.product_name_snapshot,
+                o.sku_snapshot,
+                o.quantity,
+                o.total_price,
+                o.currency,
+                o.order_status,
+                o.payment_status,
+                o.fulfillment_status,
+                o.created_at,
+                p.id AS payment_id,
+                p.payment_status AS related_payment_status,
+                p.has_pop,
+                u.display_name AS customer_display_name,
+                u.user_email AS customer_email
+            {$from_sql}
+            {$where_sql}
+            ORDER BY o.created_at DESC, o.id DESC
+            LIMIT %d OFFSET %d
+        ";
+
+        $orders = $wpdb->get_results(
+            $wpdb->prepare(
+                $query,
+                ...array_merge($params, [$pagination['per_page'], $pagination['offset']])
+            ),
+            ARRAY_A
+        );
+
+        $count_query = "
+            SELECT COUNT(*)
+            {$from_sql}
+            {$where_sql}
+        ";
+
+        $total = !empty($params)
+            ? (int) $wpdb->get_var($wpdb->prepare($count_query, ...$params))
+            : (int) $wpdb->get_var($count_query);
+
+        return [
+            'orders' => array_map([self::class, 'format_admin_order_row'], $orders),
+            'pagination' => self::pagination_payload($pagination, $total),
+        ];
+
+    }
+
+    /**
+     * Admin order detail.
+     *
+     * @param int $order_id
+     * @return array|WP_Error
+     */
+    public static function order_detail($order_id) {
+
+        global $wpdb;
+
+        $order_id = absint($order_id);
+
+        if (!$order_id) {
+            return new WP_Error('yac_invalid_order_id', 'Invalid order ID.');
+        }
+
+        $order = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT *
+                 FROM " . YAC_Orders_Table::table_name() . "
+                 WHERE id = %d",
+                $order_id
+            ),
+            ARRAY_A
+        );
+
+        if (!$order) {
+            return new WP_Error('yac_order_not_found', 'Order not found.');
+        }
+
+        $customer = self::customer_for_user((int) $order['user_id']);
+        $payment = self::latest_payment_for_order($order_id, (int) $order['user_id']);
+
+        return [
+            'order'    => self::format_admin_order_detail($order),
+            'customer' => $customer,
+            'payment'  => $payment ? self::format_admin_payment($payment) : null,
+            'item'     => self::order_item($order),
+            'timeline' => self::timeline_for(
+                ['order'],
+                $order_id,
+                $payment ? ['payment' => (int) $payment['id']] : []
+            ),
+        ];
+
+    }
+
+    /**
+     * Admin tutor requests list.
+     *
+     * @param array $args
+     * @return array|WP_Error
+     */
+    public static function tutor_requests($args = []) {
+
+        return self::request_list(
+            [
+                'table'        => YAC_Tutor_Requests_Table::table_name(),
+                'statuses'     => YAC_Status_Service::tutor_request_statuses(),
+                'default'      => 'pending',
+                'result_key'   => 'tutor_requests',
+                'type'         => 'tutor_request',
+                'search_cols'  => ['r.exam_type', 'r.exam_level', 'r.preferred_timezone', 'r.preferred_language', 'r.additional_notes'],
+                'select_extra' => 'r.exam_type, r.exam_level, r.preferred_timezone, r.preferred_language',
+                'formatter'    => [self::class, 'format_tutor_request_row'],
+            ],
+            $args
+        );
+
+    }
+
+    /**
+     * Admin tutor request detail.
+     *
+     * @param int $request_id
+     * @return array|WP_Error
+     */
+    public static function tutor_request_detail($request_id) {
+
+        return self::request_detail(
+            YAC_Tutor_Requests_Table::table_name(),
+            'tutor_request',
+            $request_id,
+            [self::class, 'format_tutor_request_detail']
+        );
+
+    }
+
+    /**
+     * Admin consulting requests list.
+     *
+     * @param array $args
+     * @return array|WP_Error
+     */
+    public static function consulting_requests($args = []) {
+
+        return self::request_list(
+            [
+                'table'        => YAC_Consulting_Requests_Table::table_name(),
+                'statuses'     => YAC_Status_Service::consulting_request_statuses(),
+                'default'      => 'pending',
+                'result_key'   => 'consulting_requests',
+                'type'         => 'consulting_request',
+                'search_cols'  => ['r.service_type', 'r.organization_name', 'r.contact_person', 'r.contact_email', 'r.contact_phone', 'r.project_summary'],
+                'select_extra' => 'r.service_type, r.organization_name, r.contact_person, r.contact_email, r.budget, r.preferred_date',
+                'formatter'    => [self::class, 'format_consulting_request_row'],
+            ],
+            $args
+        );
+
+    }
+
+    /**
+     * Admin consulting request detail.
+     *
+     * @param int $request_id
+     * @return array|WP_Error
+     */
+    public static function consulting_request_detail($request_id) {
+
+        return self::request_detail(
+            YAC_Consulting_Requests_Table::table_name(),
+            'consulting_request',
+            $request_id,
+            [self::class, 'format_consulting_request_detail']
+        );
+
+    }
+
+    /**
+     * Admin procurements list.
+     *
+     * @param array $args
+     * @return array|WP_Error
+     */
+    public static function procurements($args = []) {
+
+        global $wpdb;
+
+        $status = !empty($args['status'])
+            ? sanitize_key($args['status'])
+            : 'pending';
+
+        $allowed_statuses = array_merge(['all'], YAC_Status_Service::procurement_statuses());
+
+        if (!in_array($status, $allowed_statuses, true)) {
+            return new WP_Error('yac_invalid_procurement_filter', 'Invalid procurement status filter.');
+        }
+
+        $pagination = self::pagination_args($args);
+        $where = [];
+        $params = [];
+
+        if ($status !== 'all') {
+            $where[] = 'pr.status = %s';
+            $params[] = $status;
+        }
+
+        $search = !empty($args['search'])
+            ? sanitize_text_field($args['search'])
+            : '';
+
+        if ($search !== '') {
+            $like = '%' . $wpdb->esc_like($search) . '%';
+            $where[] = '(
+                pr.procurement_reference LIKE %s
+                OR pr.supplier_name LIKE %s
+                OR pr.tracking_number LIKE %s
+                OR pr.courier LIKE %s
+                OR o.order_number LIKE %s
+                OR u.display_name LIKE %s
+                OR u.user_email LIKE %s
+                OR CAST(pr.id AS CHAR) LIKE %s
+            )';
+            $params = array_merge($params, [$like, $like, $like, $like, $like, $like, $like, $like]);
+        }
+
+        $where_sql = !empty($where)
+            ? 'WHERE ' . implode(' AND ', $where)
+            : '';
+
+        $query = "
+            SELECT
+                pr.id,
+                pr.order_id,
+                pr.user_id,
+                pr.procurement_reference,
+                pr.supplier_name,
+                pr.tracking_number,
+                pr.courier,
+                pr.status,
+                pr.expected_delivery_date,
+                pr.created_at,
+                pr.updated_at,
+                o.order_number,
+                o.product_name_snapshot,
+                u.display_name AS customer_display_name,
+                u.user_email AS customer_email
+            FROM " . YAC_Procurements_Table::table_name() . " pr
+            LEFT JOIN " . YAC_Orders_Table::table_name() . " o
+                ON o.id = pr.order_id
+            LEFT JOIN {$wpdb->users} u
+                ON u.ID = pr.user_id
+            {$where_sql}
+            ORDER BY pr.created_at DESC, pr.id DESC
+            LIMIT %d OFFSET %d
+        ";
+
+        $procurements = $wpdb->get_results(
+            $wpdb->prepare(
+                $query,
+                ...array_merge($params, [$pagination['per_page'], $pagination['offset']])
+            ),
+            ARRAY_A
+        );
+
+        $count_query = "
+            SELECT COUNT(*)
+            FROM " . YAC_Procurements_Table::table_name() . " pr
+            LEFT JOIN " . YAC_Orders_Table::table_name() . " o
+                ON o.id = pr.order_id
+            LEFT JOIN {$wpdb->users} u
+                ON u.ID = pr.user_id
+            {$where_sql}
+        ";
+
+        $total = !empty($params)
+            ? (int) $wpdb->get_var($wpdb->prepare($count_query, ...$params))
+            : (int) $wpdb->get_var($count_query);
+
+        return [
+            'procurements' => array_map([self::class, 'format_procurement_row'], $procurements),
+            'pagination' => self::pagination_payload($pagination, $total),
+        ];
+
+    }
+
+    /**
+     * Admin procurement detail.
+     *
+     * @param int $procurement_id
+     * @return array|WP_Error
+     */
+    public static function procurement_detail($procurement_id) {
+
+        global $wpdb;
+
+        $procurement_id = absint($procurement_id);
+
+        if (!$procurement_id) {
+            return new WP_Error('yac_invalid_procurement_id', 'Invalid procurement ID.');
+        }
+
+        $procurement = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT *
+                 FROM " . YAC_Procurements_Table::table_name() . "
+                 WHERE id = %d",
+                $procurement_id
+            ),
+            ARRAY_A
+        );
+
+        if (!$procurement) {
+            return new WP_Error('yac_procurement_not_found', 'Procurement not found.');
+        }
+
+        return [
+            'procurement' => self::format_procurement_detail($procurement),
+            'customer'    => self::customer_for_user((int) $procurement['user_id']),
+            'order'       => self::order_summary((int) $procurement['order_id']),
+            'timeline'    => self::timeline_for(['procurement'], $procurement_id),
+        ];
+
+    }
+
+    /**
+     * Generic admin request list.
+     *
+     * @param array $config
+     * @param array $args
+     * @return array|WP_Error
+     */
+    private static function request_list($config, $args) {
+
+        global $wpdb;
+
+        $status = !empty($args['status'])
+            ? sanitize_key($args['status'])
+            : $config['default'];
+
+        $allowed_statuses = array_merge(['all'], $config['statuses']);
+
+        if (!in_array($status, $allowed_statuses, true)) {
+            return new WP_Error('yac_invalid_request_filter', 'Invalid request status filter.');
+        }
+
+        $pagination = self::pagination_args($args);
+        $where = [];
+        $params = [];
+
+        if ($status !== 'all') {
+            $where[] = 'r.status = %s';
+            $params[] = $status;
+        }
+
+        $search = !empty($args['search'])
+            ? sanitize_text_field($args['search'])
+            : '';
+
+        if ($search !== '') {
+            $like = '%' . $wpdb->esc_like($search) . '%';
+            $search_clauses = [];
+
+            foreach ($config['search_cols'] as $column) {
+                $search_clauses[] = "{$column} LIKE %s";
+                $params[] = $like;
+            }
+
+            $search_clauses[] = 'u.display_name LIKE %s';
+            $search_clauses[] = 'u.user_email LIKE %s';
+            $search_clauses[] = 'CAST(r.id AS CHAR) LIKE %s';
+            $params = array_merge($params, [$like, $like, $like]);
+
+            $where[] = '(' . implode(' OR ', $search_clauses) . ')';
+        }
+
+        $where_sql = !empty($where)
+            ? 'WHERE ' . implode(' AND ', $where)
+            : '';
+
+        $query = "
+            SELECT
+                r.id,
+                r.user_id,
+                r.status,
+                {$config['select_extra']},
+                r.created_at,
+                r.updated_at,
+                u.display_name AS customer_display_name,
+                u.user_email AS customer_email
+            FROM {$config['table']} r
+            LEFT JOIN {$wpdb->users} u
+                ON u.ID = r.user_id
+            {$where_sql}
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT %d OFFSET %d
+        ";
+
+        $requests = $wpdb->get_results(
+            $wpdb->prepare(
+                $query,
+                ...array_merge($params, [$pagination['per_page'], $pagination['offset']])
+            ),
+            ARRAY_A
+        );
+
+        $count_query = "
+            SELECT COUNT(*)
+            FROM {$config['table']} r
+            LEFT JOIN {$wpdb->users} u
+                ON u.ID = r.user_id
+            {$where_sql}
+        ";
+
+        $total = !empty($params)
+            ? (int) $wpdb->get_var($wpdb->prepare($count_query, ...$params))
+            : (int) $wpdb->get_var($count_query);
+
+        return [
+            $config['result_key'] => array_map($config['formatter'], $requests),
+            'pagination' => self::pagination_payload($pagination, $total),
+        ];
+
+    }
+
+    /**
+     * Generic admin request detail.
+     *
+     * @param string $table
+     * @param string $related_type
+     * @param int $request_id
+     * @param callable $formatter
+     * @return array|WP_Error
+     */
+    private static function request_detail($table, $related_type, $request_id, $formatter) {
+
+        global $wpdb;
+
+        $request_id = absint($request_id);
+
+        if (!$request_id) {
+            return new WP_Error('yac_invalid_request_id', 'Invalid request ID.');
+        }
+
+        $request = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT *
+                 FROM {$table}
+                 WHERE id = %d",
+                $request_id
+            ),
+            ARRAY_A
+        );
+
+        if (!$request) {
+            return new WP_Error('yac_request_not_found', 'Request not found.');
+        }
+
+        return [
+            'request'  => call_user_func($formatter, $request),
+            'customer' => self::customer_for_user((int) $request['user_id']),
+            'timeline' => self::timeline_for([$related_type], $request_id),
+        ];
+
+    }
+
+    /**
+     * Pagination args.
+     *
+     * @param array $args
+     * @return array
+     */
+    private static function pagination_args($args) {
+
+        $page = !empty($args['page'])
+            ? max(1, absint($args['page']))
+            : 1;
+
+        $per_page = !empty($args['per_page'])
+            ? max(1, absint($args['per_page']))
+            : 20;
+
+        if ($per_page > 100) {
+            $per_page = 100;
+        }
+
+        return [
+            'page'     => $page,
+            'per_page' => $per_page,
+            'offset'   => ($page - 1) * $per_page,
+        ];
+
+    }
+
+    /**
+     * Pagination response payload.
+     *
+     * @param array $pagination
+     * @param int $total
+     * @return array
+     */
+    private static function pagination_payload($pagination, $total) {
+
+        return [
+            'page'        => $pagination['page'],
+            'per_page'    => $pagination['per_page'],
+            'total'       => $total,
+            'total_pages' => (int) ceil($total / $pagination['per_page']),
+        ];
+
+    }
+
+    /**
+     * Customer payload from a WordPress user.
+     *
+     * @param int $user_id
+     * @return array|null
+     */
+    private static function customer_for_user($user_id) {
+
+        global $wpdb;
+
+        $customer = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT
+                    ID AS user_id,
+                    display_name,
+                    user_email
+                 FROM {$wpdb->users}
+                 WHERE ID = %d",
+                $user_id
+            ),
+            ARRAY_A
+        );
+
+        return $customer ? self::format_admin_customer($customer) : null;
+
+    }
+
+    /**
+     * Latest payment for an order.
+     *
+     * @param int $order_id
+     * @param int $user_id
+     * @return array|null
+     */
+    private static function latest_payment_for_order($order_id, $user_id) {
+
+        global $wpdb;
+
+        return $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT
+                    id,
+                    payment_reference,
+                    order_id,
+                    user_id,
+                    payment_method,
+                    amount_paid,
+                    currency,
+                    has_pop,
+                    payment_status,
+                    user_note,
+                    submitted_at,
+                    verified_at,
+                    rejected_at,
+                    rejection_reason,
+                    created_at,
+                    updated_at
+                 FROM " . YAC_Payments_Table::table_name() . "
+                 WHERE order_id = %d
+                 AND user_id = %d
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1",
+                $order_id,
+                $user_id
+            ),
+            ARRAY_A
+        );
+
+    }
+
+    /**
+     * Timeline entries for related records.
+     *
+     * @param array $primary_types
+     * @param int $primary_id
+     * @param array $extra
+     * @return array
+     */
+    private static function timeline_for($primary_types, $primary_id, $extra = []) {
+
+        global $wpdb;
+
+        $clauses = [];
+        $params = [];
+
+        foreach ($primary_types as $type) {
+            $clauses[] = '(related_type = %s AND related_id = %d)';
+            $params[] = $type;
+            $params[] = $primary_id;
+        }
+
+        foreach ($extra as $type => $id) {
+            $clauses[] = '(related_type = %s AND related_id = %d)';
+            $params[] = $type;
+            $params[] = absint($id);
+        }
+
+        if (empty($clauses)) {
+            return [];
+        }
+
+        return $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT
+                    id,
+                    user_id,
+                    actor_id,
+                    event,
+                    title,
+                    description,
+                    related_type,
+                    related_id,
+                    visibility,
+                    created_at
+                 FROM " . YAC_Timeline_Table::table_name() . "
+                 WHERE " . implode(' OR ', $clauses) . "
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 50",
+                ...$params
+            ),
+            ARRAY_A
+        );
+
+    }
+
+    /**
+     * Admin order table row.
+     *
+     * @param array $order
+     * @return array
+     */
+    private static function format_admin_order_row($order) {
+
+        return [
+            'id'                    => (int) $order['id'],
+            'order_number'          => $order['order_number'],
+            'user_id'               => (int) $order['user_id'],
+            'customer_display_name' => $order['customer_display_name'],
+            'customer_email'        => $order['customer_email'],
+            'order_source'          => $order['order_source'],
+            'woo_product_id'        => !empty($order['woo_product_id']) ? (int) $order['woo_product_id'] : null,
+            'woo_variation_id'      => !empty($order['woo_variation_id']) ? (int) $order['woo_variation_id'] : null,
+            'resource_id'           => !empty($order['resource_id']) ? (int) $order['resource_id'] : null,
+            'product_name_snapshot' => $order['product_name_snapshot'],
+            'sku_snapshot'          => $order['sku_snapshot'],
+            'quantity'              => (int) $order['quantity'],
+            'total_price'           => (float) $order['total_price'],
+            'currency'              => $order['currency'],
+            'order_status'          => $order['order_status'],
+            'payment_status'        => $order['payment_status'],
+            'fulfillment_status'    => $order['fulfillment_status'],
+            'payment_id'            => !empty($order['payment_id']) ? (int) $order['payment_id'] : null,
+            'related_payment_status'=> $order['related_payment_status'],
+            'has_pop'               => !empty($order['has_pop']) ? (int) $order['has_pop'] : 0,
+            'created_at'            => $order['created_at'],
+        ];
+
+    }
+
+    /**
+     * Admin order detail payload.
+     *
+     * @param array $order
+     * @return array
+     */
+    private static function format_admin_order_detail($order) {
+
+        return [
+            'id'                    => (int) $order['id'],
+            'order_number'          => $order['order_number'],
+            'user_id'               => (int) $order['user_id'],
+            'order_source'          => $order['order_source'],
+            'woo_product_id'        => !empty($order['woo_product_id']) ? (int) $order['woo_product_id'] : null,
+            'woo_variation_id'      => !empty($order['woo_variation_id']) ? (int) $order['woo_variation_id'] : null,
+            'resource_id'           => !empty($order['resource_id']) ? (int) $order['resource_id'] : null,
+            'product_name_snapshot' => $order['product_name_snapshot'],
+            'sku_snapshot'          => $order['sku_snapshot'],
+            'quantity'              => (int) $order['quantity'],
+            'unit_price'            => (float) $order['unit_price'],
+            'total_price'           => (float) $order['total_price'],
+            'currency'              => $order['currency'],
+            'order_status'          => $order['order_status'],
+            'payment_status'        => $order['payment_status'],
+            'fulfillment_status'    => $order['fulfillment_status'],
+            'customer_note'         => $order['customer_note'],
+            'admin_note'            => $order['admin_note'],
+            'created_at'            => $order['created_at'],
+            'updated_at'            => $order['updated_at'],
+        ];
+
+    }
+
+    /**
+     * Order item context.
+     *
+     * @param array $order
+     * @return array
+     */
+    private static function order_item($order) {
+
+        $item = [
+            'type'                  => $order['order_source'],
+            'product_name_snapshot' => $order['product_name_snapshot'],
+            'sku_snapshot'          => $order['sku_snapshot'],
+            'quantity'              => (int) $order['quantity'],
+            'unit_price'            => (float) $order['unit_price'],
+            'total_price'           => (float) $order['total_price'],
+            'currency'              => $order['currency'],
+        ];
+
+        if (($order['order_source'] ?? '') === 'resource' && !empty($order['resource_id'])) {
+            $item['resource'] = self::resource_summary((int) $order['resource_id']);
+        }
+
+        if (($order['order_source'] ?? '') === 'woocommerce_product' && !empty($order['woo_product_id'])) {
+            $item['woocommerce_product'] = self::woocommerce_product_summary((int) $order['woo_product_id']);
+        }
+
+        return $item;
+
+    }
+
+    /**
+     * Resource summary.
+     *
+     * @param int $resource_id
+     * @return array|null
+     */
+    private static function resource_summary($resource_id) {
+
+        global $wpdb;
+
+        $resource = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT
+                    id,
+                    title,
+                    category,
+                    source_type,
+                    price,
+                    currency,
+                    is_public
+                 FROM " . YAC_Resources_Table::table_name() . "
+                 WHERE id = %d",
+                $resource_id
+            ),
+            ARRAY_A
+        );
+
+        if (!$resource) {
+            return null;
+        }
+
+        return [
+            'id'          => (int) $resource['id'],
+            'title'       => $resource['title'],
+            'category'    => $resource['category'],
+            'source_type' => $resource['source_type'],
+            'price'       => (float) $resource['price'],
+            'currency'    => $resource['currency'],
+            'is_public'   => (int) $resource['is_public'],
+        ];
+
+    }
+
+    /**
+     * WooCommerce product summary when WooCommerce is available.
+     *
+     * @param int $product_id
+     * @return array|null
+     */
+    private static function woocommerce_product_summary($product_id) {
+
+        if (!function_exists('wc_get_product')) {
+            return null;
+        }
+
+        $product = wc_get_product($product_id);
+
+        if (!$product || !$product->exists()) {
+            return null;
+        }
+
+        return [
+            'id'    => (int) $product->get_id(),
+            'name'  => $product->get_name(),
+            'sku'   => $product->get_sku() ?: null,
+            'price' => (float) $product->get_price(),
+        ];
+
+    }
+
+    /**
+     * Order summary for procurement detail.
+     *
+     * @param int $order_id
+     * @return array|null
+     */
+    private static function order_summary($order_id) {
+
+        global $wpdb;
+
+        $order = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT
+                    id,
+                    order_number,
+                    order_source,
+                    product_name_snapshot,
+                    total_price,
+                    currency,
+                    order_status,
+                    payment_status,
+                    fulfillment_status,
+                    created_at
+                 FROM " . YAC_Orders_Table::table_name() . "
+                 WHERE id = %d",
+                $order_id
+            ),
+            ARRAY_A
+        );
+
+        if (!$order) {
+            return null;
+        }
+
+        return [
+            'id'                    => (int) $order['id'],
+            'order_number'          => $order['order_number'],
+            'order_source'          => $order['order_source'],
+            'product_name_snapshot' => $order['product_name_snapshot'],
+            'total_price'           => (float) $order['total_price'],
+            'currency'              => $order['currency'],
+            'order_status'          => $order['order_status'],
+            'payment_status'        => $order['payment_status'],
+            'fulfillment_status'    => $order['fulfillment_status'],
+            'created_at'            => $order['created_at'],
+        ];
+
+    }
+
+    /**
+     * Tutor request list row.
+     *
+     * @param array $request
+     * @return array
+     */
+    private static function format_tutor_request_row($request) {
+
+        return [
+            'id'                    => (int) $request['id'],
+            'user_id'               => (int) $request['user_id'],
+            'customer_display_name' => $request['customer_display_name'],
+            'customer_email'        => $request['customer_email'],
+            'request_type'          => 'tutor_request',
+            'status'                => $request['status'],
+            'exam_type'             => $request['exam_type'],
+            'exam_level'            => $request['exam_level'],
+            'preferred_timezone'    => $request['preferred_timezone'],
+            'preferred_language'    => $request['preferred_language'],
+            'created_at'            => $request['created_at'],
+            'updated_at'            => $request['updated_at'],
+        ];
+
+    }
+
+    /**
+     * Tutor request detail payload.
+     *
+     * @param array $request
+     * @return array
+     */
+    private static function format_tutor_request_detail($request) {
+
+        $request['id'] = (int) $request['id'];
+        $request['user_id'] = (int) $request['user_id'];
+        $request['assigned_tutor_id'] = !empty($request['assigned_tutor_id']) ? (int) $request['assigned_tutor_id'] : null;
+        $request['matched_by'] = !empty($request['matched_by']) ? (int) $request['matched_by'] : null;
+        $request['session_started_by'] = !empty($request['session_started_by']) ? (int) $request['session_started_by'] : null;
+        $request['completed_by'] = !empty($request['completed_by']) ? (int) $request['completed_by'] : null;
+        $request['request_type'] = 'tutor_request';
+
+        return $request;
+
+    }
+
+    /**
+     * Consulting request list row.
+     *
+     * @param array $request
+     * @return array
+     */
+    private static function format_consulting_request_row($request) {
+
+        return [
+            'id'                    => (int) $request['id'],
+            'user_id'               => (int) $request['user_id'],
+            'customer_display_name' => $request['customer_display_name'],
+            'customer_email'        => $request['customer_email'],
+            'request_type'          => 'consulting_request',
+            'status'                => $request['status'],
+            'service_type'          => $request['service_type'],
+            'organization_name'     => $request['organization_name'],
+            'contact_person'        => $request['contact_person'],
+            'contact_email'         => $request['contact_email'],
+            'budget'                => $request['budget'] !== null ? (float) $request['budget'] : null,
+            'preferred_date'        => $request['preferred_date'],
+            'created_at'            => $request['created_at'],
+            'updated_at'            => $request['updated_at'],
+        ];
+
+    }
+
+    /**
+     * Consulting request detail payload.
+     *
+     * @param array $request
+     * @return array
+     */
+    private static function format_consulting_request_detail($request) {
+
+        $request['id'] = (int) $request['id'];
+        $request['user_id'] = (int) $request['user_id'];
+        $request['budget'] = $request['budget'] !== null ? (float) $request['budget'] : null;
+        $request['assigned_to'] = !empty($request['assigned_to']) ? (int) $request['assigned_to'] : null;
+        $request['assigned_by'] = !empty($request['assigned_by']) ? (int) $request['assigned_by'] : null;
+        $request['started_by'] = !empty($request['started_by']) ? (int) $request['started_by'] : null;
+        $request['completed_by'] = !empty($request['completed_by']) ? (int) $request['completed_by'] : null;
+        $request['request_type'] = 'consulting_request';
+
+        return $request;
+
+    }
+
+    /**
+     * Procurement request list row.
+     *
+     * @param array $procurement
+     * @return array
+     */
+    private static function format_procurement_row($procurement) {
+
+        return [
+            'id'                    => (int) $procurement['id'],
+            'order_id'              => (int) $procurement['order_id'],
+            'order_number'          => $procurement['order_number'],
+            'user_id'               => (int) $procurement['user_id'],
+            'customer_display_name' => $procurement['customer_display_name'],
+            'customer_email'        => $procurement['customer_email'],
+            'request_type'          => 'procurement',
+            'procurement_reference' => $procurement['procurement_reference'],
+            'product_name_snapshot' => $procurement['product_name_snapshot'],
+            'supplier_name'         => $procurement['supplier_name'],
+            'tracking_number'       => $procurement['tracking_number'],
+            'courier'               => $procurement['courier'],
+            'status'                => $procurement['status'],
+            'expected_delivery_date'=> $procurement['expected_delivery_date'],
+            'created_at'            => $procurement['created_at'],
+            'updated_at'            => $procurement['updated_at'],
+        ];
+
+    }
+
+    /**
+     * Procurement request detail payload.
+     *
+     * @param array $procurement
+     * @return array
+     */
+    private static function format_procurement_detail($procurement) {
+
+        $procurement['id'] = (int) $procurement['id'];
+        $procurement['order_id'] = (int) $procurement['order_id'];
+        $procurement['user_id'] = (int) $procurement['user_id'];
+        $procurement['ordered_by'] = !empty($procurement['ordered_by']) ? (int) $procurement['ordered_by'] : null;
+        $procurement['shipped_by'] = !empty($procurement['shipped_by']) ? (int) $procurement['shipped_by'] : null;
+        $procurement['delivered_by'] = !empty($procurement['delivered_by']) ? (int) $procurement['delivered_by'] : null;
+        $procurement['request_type'] = 'procurement';
+
+        return $procurement;
+
+    }
+
+    /**
      * Count payments awaiting admin verification.
      *
      * @return int
