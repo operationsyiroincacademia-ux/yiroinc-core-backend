@@ -549,7 +549,11 @@ class YAC_Admin_Service {
             ? sanitize_key($args['status'])
             : 'all';
 
-        $allowed_statuses = array_merge(['all'], YAC_Status_Service::order_statuses());
+        $allowed_statuses = [
+            'all',
+            'awaiting_payment',
+            'paid',
+        ];
 
         if (!in_array($status, $allowed_statuses, true)) {
             return new WP_Error('yac_invalid_order_filter', 'Invalid order status filter.');
@@ -559,9 +563,10 @@ class YAC_Admin_Service {
         $where = [];
         $params = [];
 
-        if ($status !== 'all') {
-            $where[] = 'o.order_status = %s';
-            $params[] = $status;
+        if ($status === 'awaiting_payment') {
+            $where[] = 'COALESCE(p.has_pop, 0) = 0';
+        } elseif ($status === 'paid') {
+            $where[] = 'p.has_pop = 1';
         }
 
         $search = !empty($args['search'])
@@ -689,11 +694,15 @@ class YAC_Admin_Service {
 
         $customer = self::customer_for_user((int) $order['user_id']);
         $payment = self::latest_payment_for_order($order_id, (int) $order['user_id']);
+        $proof = $payment && !empty($payment['has_pop'])
+            ? self::latest_order_payment_proof((int) $payment['id'])
+            : null;
 
         return [
-            'order'    => self::format_admin_order_detail($order),
+            'order'    => self::format_admin_order_detail($order, $payment),
             'customer' => $customer,
             'payment'  => $payment ? self::format_admin_payment($payment) : null,
+            'proof'    => $proof,
             'item'     => self::order_item($order),
             'timeline' => self::timeline_for(
                 ['order'],
@@ -1191,6 +1200,67 @@ class YAC_Admin_Service {
     }
 
     /**
+     * Latest proof metadata for the order's current payment.
+     *
+     * @param int $payment_id
+     * @return array|null
+     */
+    private static function latest_order_payment_proof($payment_id) {
+
+        global $wpdb;
+
+        $proof = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT
+                    id,
+                    file_name,
+                    original_name,
+                    mime_type,
+                    file_size,
+                    created_at
+                 FROM " . YAC_Files_Table::table_name() . "
+                 WHERE related_type = %s
+                 AND related_id = %d
+                 AND file_type = %s
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1",
+                'payment',
+                $payment_id,
+                'proof_of_payment'
+            ),
+            ARRAY_A
+        );
+
+        if (!$proof) {
+            return null;
+        }
+
+        return [
+            'file_id'       => (int) $proof['id'],
+            'file_name'     => $proof['file_name'],
+            'original_name' => $proof['original_name'],
+            'mime_type'     => $proof['mime_type'],
+            'file_size'     => (int) $proof['file_size'],
+            'created_at'    => $proof['created_at'],
+        ];
+
+    }
+
+    /**
+     * Admin-facing order status derived from POP submission.
+     *
+     * @param array|null $payment
+     * @return string
+     */
+    private static function admin_order_status($payment) {
+
+        return !empty($payment['has_pop'])
+            ? 'paid'
+            : 'awaiting_payment';
+
+    }
+
+    /**
      * Timeline entries for related records.
      *
      * @param array $primary_types
@@ -1269,6 +1339,7 @@ class YAC_Admin_Service {
             'total_price'           => (float) $order['total_price'],
             'currency'              => $order['currency'],
             'order_status'          => $order['order_status'],
+            'admin_order_status'    => self::admin_order_status($order),
             'payment_status'        => $order['payment_status'],
             'fulfillment_status'    => $order['fulfillment_status'],
             'payment_id'            => !empty($order['payment_id']) ? (int) $order['payment_id'] : null,
@@ -1285,7 +1356,7 @@ class YAC_Admin_Service {
      * @param array $order
      * @return array
      */
-    private static function format_admin_order_detail($order) {
+    private static function format_admin_order_detail($order, $payment = null) {
 
         return [
             'id'                    => (int) $order['id'],
@@ -1302,6 +1373,7 @@ class YAC_Admin_Service {
             'total_price'           => (float) $order['total_price'],
             'currency'              => $order['currency'],
             'order_status'          => $order['order_status'],
+            'admin_order_status'    => self::admin_order_status($payment),
             'payment_status'        => $order['payment_status'],
             'fulfillment_status'    => $order['fulfillment_status'],
             'customer_note'         => $order['customer_note'],
