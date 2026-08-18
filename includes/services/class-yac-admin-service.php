@@ -7,6 +7,24 @@ if (!defined('ABSPATH')) {
 class YAC_Admin_Service {
 
     /**
+     * Complete admin dashboard payload.
+     *
+     * @return array
+     */
+    public static function dashboard_payload() {
+
+        return [
+            'summary'                     => self::dashboard(),
+            'recent_activity'             => self::recent_activity(),
+            'pending_payments'            => self::pending_payments(),
+            'pending_tutor_requests'      => self::pending_tutor_requests(),
+            'pending_consulting_requests' => self::pending_consulting_requests(),
+            'pending_procurements'        => self::pending_procurements(),
+        ];
+
+    }
+
+    /**
      * Dashboard summary.
      *
      * @return array
@@ -17,15 +35,58 @@ class YAC_Admin_Service {
 
         return [
 
-            'pending_payments' => (int) $wpdb->get_var(
-                "SELECT COUNT(*) FROM " . YAC_Payments_Table::table_name() . "
-                 WHERE payment_status = 'pending'"
+            'users' => (int) $wpdb->get_var(
+                "SELECT COUNT(*) FROM " . YAC_Profiles_Table::table_name()
             ),
 
-            'pending_procurements' => (int) $wpdb->get_var(
-                "SELECT COUNT(*) FROM " . YAC_Procurements_Table::table_name() . "
-                 WHERE status = 'pending'"
-            ),
+            'resources' => [
+                'total' => (int) $wpdb->get_var(
+                    "SELECT COUNT(*) FROM " . YAC_Resources_Table::table_name()
+                ),
+                'free' => (int) $wpdb->get_var(
+                    "SELECT COUNT(*) FROM " . YAC_Resources_Table::table_name() . "
+                     WHERE price = 0"
+                ),
+                'paid' => (int) $wpdb->get_var(
+                    "SELECT COUNT(*) FROM " . YAC_Resources_Table::table_name() . "
+                     WHERE price > 0"
+                ),
+            ],
+
+            'orders' => [
+                'awaiting_payment' => (int) $wpdb->get_var(
+                    "SELECT COUNT(*) FROM " . YAC_Orders_Table::table_name() . "
+                     WHERE order_status = 'awaiting_payment'"
+                ),
+                'under_review' => (int) $wpdb->get_var(
+                    "SELECT COUNT(*) FROM " . YAC_Orders_Table::table_name() . "
+                     WHERE order_status = 'under_review'"
+                ),
+                'processing' => (int) $wpdb->get_var(
+                    "SELECT COUNT(*) FROM " . YAC_Orders_Table::table_name() . "
+                     WHERE order_status = 'processing'"
+                ),
+                'completed' => (int) $wpdb->get_var(
+                    "SELECT COUNT(*) FROM " . YAC_Orders_Table::table_name() . "
+                     WHERE order_status = 'completed'"
+                ),
+                'cancelled' => (int) $wpdb->get_var(
+                    "SELECT COUNT(*) FROM " . YAC_Orders_Table::table_name() . "
+                     WHERE order_status = 'cancelled'"
+                ),
+            ],
+
+            'payments' => [
+                'awaiting_verification' => self::awaiting_verification_payment_count(),
+                'verified' => (int) $wpdb->get_var(
+                    "SELECT COUNT(*) FROM " . YAC_Payments_Table::table_name() . "
+                     WHERE payment_status = 'verified'"
+                ),
+                'rejected' => (int) $wpdb->get_var(
+                    "SELECT COUNT(*) FROM " . YAC_Payments_Table::table_name() . "
+                     WHERE payment_status = 'rejected'"
+                ),
+            ],
 
             'pending_tutor_requests' => (int) $wpdb->get_var(
                 "SELECT COUNT(*) FROM " . YAC_Tutor_Requests_Table::table_name() . "
@@ -37,14 +98,10 @@ class YAC_Admin_Service {
                  WHERE status = 'pending'"
             ),
 
-            'resources' => (int) $wpdb->get_var(
-                "SELECT COUNT(*) FROM " . YAC_Resources_Table::table_name()
+            'pending_procurements' => (int) $wpdb->get_var(
+                "SELECT COUNT(*) FROM " . YAC_Procurements_Table::table_name() . "
+                 WHERE status = 'pending'"
             ),
-
-            'users' => (int) $wpdb->get_var(
-                "SELECT COUNT(*) FROM " . YAC_Profiles_Table::table_name()
-            ),
-
         ];
 
     }
@@ -84,9 +141,28 @@ class YAC_Admin_Service {
         return $wpdb->get_results(
             "SELECT *
              FROM " . YAC_Payments_Table::table_name() . "
-             WHERE payment_status='pending'
+             WHERE payment_status IN ('pending', 'submitted')
+             AND has_pop = 1
              ORDER BY created_at DESC",
             ARRAY_A
+        );
+
+    }
+
+    /**
+     * Count payments awaiting admin verification.
+     *
+     * @return int
+     */
+    private static function awaiting_verification_payment_count() {
+
+        global $wpdb;
+
+        return (int) $wpdb->get_var(
+            "SELECT COUNT(*)
+             FROM " . YAC_Payments_Table::table_name() . "
+             WHERE payment_status IN ('pending', 'submitted')
+             AND has_pop = 1"
         );
 
     }

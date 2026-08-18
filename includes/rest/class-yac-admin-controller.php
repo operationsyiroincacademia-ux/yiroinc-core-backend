@@ -90,9 +90,7 @@ class YAC_Admin_Controller extends YAC_REST_Controller {
      */
     public function dashboard(WP_REST_Request $request) {
 
-        return $this->success([
-            'dashboard' => YAC_Admin_Service::dashboard(),
-        ]);
+        return $this->success(YAC_Admin_Service::dashboard_payload());
 
     }
 

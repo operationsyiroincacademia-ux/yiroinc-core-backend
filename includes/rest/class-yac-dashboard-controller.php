@@ -135,14 +135,7 @@ class YAC_Dashboard_Controller extends YAC_REST_Controller {
      */
     public function admin_dashboard(WP_REST_Request $request) {
 
-        return $this->success([
-            'summary'                     => YAC_Admin_Service::dashboard(),
-            'recent_activity'             => YAC_Admin_Service::recent_activity(),
-            'pending_payments'            => YAC_Admin_Service::pending_payments(),
-            'pending_procurements'        => YAC_Admin_Service::pending_procurements(),
-            'pending_tutor_requests'      => YAC_Admin_Service::pending_tutor_requests(),
-            'pending_consulting_requests' => YAC_Admin_Service::pending_consulting_requests(),
-        ]);
+        return $this->success(YAC_Admin_Service::dashboard_payload());
 
     }
 
