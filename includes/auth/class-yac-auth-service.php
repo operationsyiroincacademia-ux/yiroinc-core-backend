@@ -26,8 +26,9 @@ class YAC_Auth_Service {
         }
 
         $profile = YAC_Profile_Service::get_by_user_id($user->ID);
+        $is_admin = user_can($user->ID, 'manage_options');
 
-        if (!$profile) {
+        if (!$profile && !$is_admin) {
             return false;
         }
 
@@ -35,8 +36,6 @@ class YAC_Auth_Service {
             'user_id' => $user->ID,
             'email'   => $user->user_email,
         ]);
-
-        $is_admin = user_can($user->ID, 'manage_options');
 
         return [
             'token' => $token,
@@ -51,10 +50,12 @@ class YAC_Auth_Service {
                     'manage_options' => $is_admin ? 1 : 0,
                 ],
             ],
-            'profile' => [
-                'id'           => (int) $profile['id'],
-                'profile_type' => $profile['profile_type'],
-            ],
+            'profile' => $profile
+                ? [
+                    'id'           => (int) $profile['id'],
+                    'profile_type' => $profile['profile_type'],
+                ]
+                : null,
             'auth' => [
                 'is_admin'     => $is_admin ? 1 : 0,
                 'capabilities' => [
