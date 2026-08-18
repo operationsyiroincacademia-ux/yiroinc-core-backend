@@ -233,7 +233,7 @@ class YAC_Resource_Service {
 
     }
 
-    public static function find_by_woo_product_id($woo_product_id) {
+    public static function find_raw($id) {
 
         global $wpdb;
 
@@ -241,9 +241,9 @@ class YAC_Resource_Service {
             $wpdb->prepare(
                 "SELECT *
                  FROM " . self::table() . "
-                 WHERE woo_product_id = %d
+                 WHERE id = %d
                  LIMIT 1",
-                (int) $woo_product_id
+                (int) $id
             ),
             ARRAY_A
         );
@@ -320,11 +320,14 @@ class YAC_Resource_Service {
 
     public static function grant_entitlement_for_order($order) {
 
-        if (empty($order['woo_product_id'])) {
+        if (
+            ($order['order_source'] ?? 'woocommerce_product') !== 'resource' ||
+            empty($order['resource_id'])
+        ) {
             return null;
         }
 
-        $resource = self::find_by_woo_product_id($order['woo_product_id']);
+        $resource = self::find_raw($order['resource_id']);
 
         if (!$resource) {
             return null;
@@ -344,7 +347,7 @@ class YAC_Resource_Service {
 
         return self::grant_entitlement(
             $order['user_id'],
-            $resource['id'],
+            $order['resource_id'],
             $order['id'],
             $payment['id']
         );
@@ -490,7 +493,7 @@ class YAC_Resource_Service {
         return [
             'sql'    => "(
                 {$visibility['sql']}
-                AND r.woo_product_id IS NULL
+                AND r.price <= 0
             )",
             'params' => $visibility['params'],
         ];
@@ -500,14 +503,14 @@ class YAC_Resource_Service {
     private static function format($resource, $user_id = null) {
 
         $is_purchased = !empty($resource['entitlement_id']);
-        $is_buyable = !empty($resource['woo_product_id']);
+        $price = isset($resource['price']) ? (float) $resource['price'] : 0.0;
+        $is_paid = $price > 0;
+        $is_buyable = $is_paid && !$is_purchased;
         $has_direct_access = self::resource_has_direct_access($resource, $user_id);
         $is_accessible = $has_direct_access || $is_purchased;
         $access_state = $is_accessible
             ? ($is_purchased ? 'purchased' : 'accessible')
             : ($is_buyable ? 'buyable' : 'restricted');
-
-        $product = self::format_product((int) ($resource['woo_product_id'] ?? 0));
 
         return [
             'id'            => (int) $resource['id'],
@@ -527,14 +530,13 @@ class YAC_Resource_Service {
                 ? (int) $resource['file_size']
                 : null,
             'external_url'  => $is_accessible ? $resource['external_url'] : null,
-            'woo_product_id' => !empty($resource['woo_product_id'])
-                ? (int) $resource['woo_product_id']
-                : null,
+            'price'         => $price,
+            'currency'      => $resource['currency'] ?? get_option('yac_bank_currency', 'NGN'),
+            'is_paid'       => $is_paid ? 1 : 0,
             'is_buyable'    => $is_buyable ? 1 : 0,
             'is_purchased'  => $is_purchased ? 1 : 0,
             'is_accessible' => $is_accessible ? 1 : 0,
             'access_state'  => $access_state,
-            'product'       => $product,
             'entitlement'   => $is_purchased
                 ? [
                     'id'         => (int) $resource['entitlement_id'],
@@ -558,7 +560,7 @@ class YAC_Resource_Service {
             return true;
         }
 
-        if (!empty($resource['woo_product_id'])) {
+        if (isset($resource['price']) && (float) $resource['price'] > 0) {
             return false;
         }
 
@@ -580,27 +582,6 @@ class YAC_Resource_Service {
             empty($resource['exam_type']) ||
             ($profile['exam_type'] ?? '') === $resource['exam_type']
         );
-
-    }
-
-    private static function format_product($woo_product_id) {
-
-        if (!$woo_product_id || !function_exists('wc_get_product')) {
-            return null;
-        }
-
-        $product = wc_get_product($woo_product_id);
-
-        if (!$product || !$product->exists()) {
-            return null;
-        }
-
-        return [
-            'id'       => $product->get_id(),
-            'name'     => $product->get_name(),
-            'price'    => (float) $product->get_price(),
-            'currency' => get_woocommerce_currency(),
-        ];
 
     }
 

@@ -33,6 +33,11 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             '/resources/(?P<id>\d+)',
             [
                 [
+                    'methods'             => WP_REST_Server::EDITABLE,
+                    'callback'            => [$this, 'update_resource'],
+                    'permission_callback' => [YAC_Auth_Helper::class, 'authorize_admin'],
+                ],
+                [
                     'methods'             => WP_REST_Server::READABLE,
                     'callback'            => [$this, 'get_resource'],
                     'permission_callback' => [YAC_Auth_Helper::class, 'authorize'],
@@ -82,6 +87,73 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
 
         return $this->success([
             'resource_id' => $resource_id,
+        ]);
+
+    }
+
+    /**
+     * Update resource.
+     */
+    public function update_resource(WP_REST_Request $request) {
+
+        global $wpdb;
+
+        $resource_id = absint($request['id']);
+
+        if (!$resource_id) {
+            return $this->error('Invalid resource ID.', 422);
+        }
+
+        $existing = YAC_Resource_Service::find_raw($resource_id);
+
+        if (!$existing) {
+            return $this->error('Resource not found.', 404);
+        }
+
+        $data = $request->get_json_params();
+
+        $merged = array_merge($existing, $data);
+
+        if (($merged['source_type'] ?? null) === 'external' && !array_key_exists('file_id', $data)) {
+            $merged['file_id'] = null;
+        }
+
+        if (($merged['source_type'] ?? null) === 'file' && !array_key_exists('external_url', $data)) {
+            $merged['external_url'] = null;
+        }
+
+        $resource = $this->prepare_resource_data(
+            $merged,
+            true,
+            $existing
+        );
+
+        if (is_wp_error($resource)) {
+            return $resource;
+        }
+
+        $updated = $wpdb->update(
+            YAC_Resources_Table::table_name(),
+            $resource,
+            [
+                'id' => $resource_id,
+            ]
+        );
+
+        if ($updated === false) {
+            return $this->error('Unable to update resource.');
+        }
+
+        if (
+            $resource['source_type'] === 'file' &&
+            (int) $resource['file_id'] !== (int) ($existing['file_id'] ?? 0) &&
+            !YAC_Resource_Service::link_file($resource['file_id'], $resource_id)
+        ) {
+            return $this->error('Resource updated, but file could not be linked.', 500);
+        }
+
+        return $this->success([
+            'message' => 'Resource updated successfully.',
         ]);
 
     }
@@ -143,7 +215,7 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
 
     }
 
-    private function prepare_resource_data(array $data) {
+    private function prepare_resource_data(array $data, $is_update = false, $existing = null) {
 
         $required = [
             'title',
@@ -177,9 +249,10 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             'source_type'  => $source_type,
             'file_id'      => null,
             'external_url' => null,
-            'woo_product_id' => !empty($data['woo_product_id'])
-                ? absint($data['woo_product_id'])
-                : null,
+            'price'        => 0.0,
+            'currency'     => isset($data['currency'])
+                ? strtoupper(sanitize_text_field($data['currency']))
+                : get_option('yac_bank_currency', 'NGN'),
             'profile_type' => isset($data['profile_type'])
                 ? sanitize_key($data['profile_type'])
                 : null,
@@ -189,23 +262,20 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             'is_public'    => !empty($data['is_public']) ? 1 : 0,
         ];
 
-        if (!empty($resource['woo_product_id'])) {
-            if (!function_exists('wc_get_product')) {
-                return $this->validation_error('WooCommerce is unavailable.', 503);
+        if (isset($data['price'])) {
+            if (!is_numeric($data['price'])) {
+                return $this->validation_error('Invalid price.', 422);
             }
 
-            $product = wc_get_product($resource['woo_product_id']);
+            $resource['price'] = (float) $data['price'];
+        }
 
-            if (!$product || !$product->exists()) {
-                return $this->validation_error('WooCommerce product not found.', 404);
-            }
+        if ($resource['price'] < 0) {
+            return $this->validation_error('price must be zero or greater.', 422);
+        }
 
-            if (YAC_Resource_Service::find_by_woo_product_id($resource['woo_product_id'])) {
-                return $this->validation_error(
-                    'WooCommerce product is already mapped to a resource.',
-                    409
-                );
-            }
+        if (!preg_match('/^[A-Z]{3,10}$/', $resource['currency'])) {
+            return $this->validation_error('Invalid currency.', 422);
         }
 
         $lengths = [
@@ -254,14 +324,14 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
         }
 
         if ($source_type === 'file') {
-            return $this->prepare_file_resource($data, $resource);
+            return $this->prepare_file_resource($data, $resource, $is_update, $existing);
         }
 
         return $this->prepare_external_resource($data, $resource);
 
     }
 
-    private function prepare_file_resource(array $data, array $resource) {
+    private function prepare_file_resource(array $data, array $resource, $is_update = false, $existing = null) {
 
         if (empty($data['file_id'])) {
             return $this->validation_error('file_id is required for file resources.', 422);
@@ -283,7 +353,10 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             return $this->validation_error('Resource file not found.', 404);
         }
 
-        if (!empty($file['related_id'])) {
+        if (
+            !empty($file['related_id']) &&
+            (!$is_update || (int) $file['related_id'] !== (int) ($existing['id'] ?? 0))
+        ) {
             return $this->validation_error(
                 'Resource file is already associated with a resource.',
                 409

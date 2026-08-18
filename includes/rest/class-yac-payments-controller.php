@@ -116,7 +116,7 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
     
         $order = $wpdb->get_row(
             $wpdb->prepare(
-                "SELECT id, user_id, order_number, total_price
+                "SELECT id, user_id, order_number, total_price, currency
                  FROM " . YAC_Orders_Table::table_name() . "
                  WHERE id = %d
                  AND user_id = %d",
@@ -135,6 +135,7 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
             'order_id'          => (int) $order['id'],
             'payment_reference' => $order['order_number'],
             'amount_paid'       => (float) $order['total_price'],
+            'currency'          => $order['currency'],
         ];
     
         $payment_id = YAC_Payment_Service::create($data);
@@ -148,7 +149,7 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
             'order_id'          => (int) $order['id'],
             'payment_reference' => $order['order_number'],
             'amount_paid'       => (float) $order['total_price'],
-            'currency'          => get_woocommerce_currency(),
+            'currency'          => $order['currency'],
         ]);
     
     }

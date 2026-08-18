@@ -19,13 +19,16 @@ class YAC_Order_Service extends YAC_Base_Service {
             [
                 'order_number'          => $data['order_number'],
                 'user_id'               => $data['user_id'],
-                'woo_product_id'        => $data['woo_product_id'],
+                'order_source'          => $data['order_source'] ?? 'woocommerce_product',
+                'woo_product_id'        => $data['woo_product_id'] ?? null,
                 'woo_variation_id'      => $data['woo_variation_id'] ?? null,
+                'resource_id'           => $data['resource_id'] ?? null,
                 'product_name_snapshot' => $data['product_name_snapshot'],
                 'sku_snapshot'          => $data['sku_snapshot'] ?? null,
                 'quantity'              => $data['quantity'] ?? 1,
                 'unit_price'            => $data['unit_price'],
                 'total_price'           => $data['total_price'],
+                'currency'              => $data['currency'] ?? 'NGN',
                 'customer_note'         => $data['customer_note'] ?? null,
                 'admin_note'            => null,
             ]
@@ -82,7 +85,15 @@ class YAC_Order_Service extends YAC_Base_Service {
      */
     public static function format_order($order) {
 
-        $order['currency'] = get_woocommerce_currency();
+        if (empty($order['currency'])) {
+            if (($order['order_source'] ?? 'woocommerce_product') === 'resource') {
+                $order['currency'] = get_option('yac_bank_currency', 'NGN');
+            } else {
+                $order['currency'] = function_exists('get_woocommerce_currency')
+                    ? get_woocommerce_currency()
+                    : get_option('yac_bank_currency', 'NGN');
+            }
+        }
 
         $order['payment_id'] = !empty($order['payment_id'])
             ? (int) $order['payment_id']

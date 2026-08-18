@@ -137,21 +137,29 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
 
         $data['user_id'] = $user_id;
 
-        /**
-         * Only accept product and quantity from the user.
-         */
-        $required = [
-            'woo_product_id',
-        ];
+        $order_source = !empty($data['order_source'])
+            ? sanitize_key($data['order_source'])
+            : null;
 
-        foreach ($required as $field) {
+        if (
+            $order_source &&
+            !in_array($order_source, ['woocommerce_product', 'resource'], true)
+        ) {
+            return $this->error('Invalid order_source.', 422);
+        }
 
-            $validation = YAC_Validation_Service::required($data, $field);
+        if (!empty($data['resource_id']) && !empty($data['woo_product_id'])) {
+            return $this->error('Provide either resource_id or woo_product_id, not both.', 422);
+        }
 
-            if (is_wp_error($validation)) {
-                return $validation;
-            }
+        if ($order_source === 'resource' || !empty($data['resource_id'])) {
+            return $this->create_resource_order($data, $user_id);
+        }
 
+        $validation = YAC_Validation_Service::required($data, 'woo_product_id');
+
+        if (is_wp_error($validation)) {
+            return $validation;
         }
 
         $product_id = absint($data['woo_product_id']);
@@ -188,11 +196,13 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
             wp_generate_password(10, false, false)
         );
 
+        $data['order_source']          = 'woocommerce_product';
         $data['product_name_snapshot'] = $product->get_name();
         $data['sku_snapshot']          = $product->get_sku() ?: null;
         $data['quantity']              = $quantity;
         $data['unit_price']            = $unit_price;
         $data['total_price']           = $unit_price * $quantity;
+        $data['currency']              = get_woocommerce_currency();
 
         $order_id = YAC_Order_Service::create($data);
 
@@ -204,8 +214,67 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
             'order_id'        => $order_id,
             'order_reference' => $data['order_number'],
             'total_amount'    => $data['total_price'],
-            'currency'        => get_woocommerce_currency(),
+            'currency'        => $data['currency'],
         ]);
+    }
+
+    private function create_resource_order(array $data, $user_id) {
+
+        $resource_id = !empty($data['resource_id'])
+            ? absint($data['resource_id'])
+            : 0;
+
+        if (!$resource_id) {
+            return $this->error('Invalid resource ID.', 422);
+        }
+
+        $resource = YAC_Resource_Service::find($resource_id, $user_id);
+
+        if (!$resource) {
+            return $this->error('Resource not found.', 404);
+        }
+
+        if (empty($resource['is_paid'])) {
+            return $this->error('Resource is free and does not require an order.', 422);
+        }
+
+        if (!empty($resource['is_purchased'])) {
+            return $this->error('Resource has already been purchased.', 409);
+        }
+
+        $order = [
+            'order_number'          => 'YAC-' . strtoupper(
+                wp_generate_password(10, false, false)
+            ),
+            'user_id'               => $user_id,
+            'order_source'          => 'resource',
+            'woo_product_id'        => null,
+            'woo_variation_id'      => null,
+            'resource_id'           => $resource_id,
+            'product_name_snapshot' => $resource['title'],
+            'sku_snapshot'          => null,
+            'quantity'              => 1,
+            'unit_price'            => (float) $resource['price'],
+            'total_price'           => (float) $resource['price'],
+            'currency'              => $resource['currency'],
+            'customer_note'         => isset($data['customer_note'])
+                ? sanitize_textarea_field($data['customer_note'])
+                : null,
+        ];
+
+        $order_id = YAC_Order_Service::create($order);
+
+        if (!$order_id) {
+            return $this->error('Unable to create order.');
+        }
+
+        return $this->success([
+            'order_id'        => $order_id,
+            'order_reference' => $order['order_number'],
+            'total_amount'    => $order['total_price'],
+            'currency'        => $order['currency'],
+        ]);
+
     }
 
     /**
@@ -432,10 +501,15 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
 
     private function validate_digital_resource_payment($order) {
 
-        $resource = YAC_Resource_Service::find_by_woo_product_id($order['woo_product_id']);
-
-        if (!$resource) {
+        if (($order['order_source'] ?? 'woocommerce_product') !== 'resource') {
             return true;
+        }
+
+        if (empty($order['resource_id'])) {
+            return new WP_Error(
+                'yac_invalid_resource_order',
+                'Resource order is missing a resource.'
+            );
         }
 
         $payment = YAC_Resource_Service::verified_payment_for_order(
