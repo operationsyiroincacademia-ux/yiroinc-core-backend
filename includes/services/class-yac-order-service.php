@@ -33,4 +33,70 @@ class YAC_Order_Service extends YAC_Base_Service {
 
     }
 
+    /**
+     * Get all orders for a user with the latest related payment context.
+     *
+     * @param int $user_id
+     * @return array
+     */
+    public static function all($user_id) {
+
+        global $wpdb;
+
+        $orders_table   = YAC_Orders_Table::table_name();
+        $payments_table = YAC_Payments_Table::table_name();
+
+        $orders = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT
+                    o.*,
+                    p.id AS payment_id,
+                    p.has_pop,
+                    p.payment_status AS related_payment_status
+                 FROM {$orders_table} o
+                 LEFT JOIN {$payments_table} p
+                    ON p.id = (
+                        SELECT p2.id
+                        FROM {$payments_table} p2
+                        WHERE p2.order_id = o.id
+                        AND p2.user_id = o.user_id
+                        ORDER BY p2.created_at DESC
+                        LIMIT 1
+                    )
+                 WHERE o.user_id = %d
+                 ORDER BY o.created_at DESC",
+                $user_id
+            ),
+            ARRAY_A
+        );
+
+        return array_map([self::class, 'format_order'], $orders);
+
+    }
+
+    /**
+     * Normalize order payment context fields.
+     *
+     * @param array $order
+     * @return array
+     */
+    public static function format_order($order) {
+
+        $order['currency'] = get_woocommerce_currency();
+
+        $order['payment_id'] = !empty($order['payment_id'])
+            ? (int) $order['payment_id']
+            : null;
+
+        $order['has_pop'] = !empty($order['has_pop'])
+            ? (int) $order['has_pop']
+            : 0;
+
+        $order['related_payment_status'] =
+            $order['related_payment_status'] ?: null;
+
+        return $order;
+
+    }
+
 }

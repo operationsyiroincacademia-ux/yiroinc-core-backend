@@ -74,9 +74,10 @@ class YAC_Dashboard_Controller extends YAC_REST_Controller {
 
         return $this->success([
             'profile'       => YAC_Profile_Service::get_by_user_id($user_id),
-            'resources'     => YAC_Resource_Service::all(),
+            'resources'     => YAC_Resource_Service::all($user_id),
             'notifications' => YAC_Notification_Service::all($user_id),
             'timeline'      => YAC_Timeline_Service::all($user_id),
+            'orders'        => YAC_Order_Service::all($user_id),
         ]);
 
     }
@@ -96,9 +97,11 @@ class YAC_Dashboard_Controller extends YAC_REST_Controller {
             'profile'       => YAC_Profile_Service::get_by_user_id($user_id),
             'payments'      => YAC_Payment_Service::all($user_id),
             'procurements'  => YAC_Procurement_Service::all($user_id),
-            'resources'     => YAC_Resource_Service::all(),
+            'resources'     => YAC_Resource_Service::all($user_id),
             'notifications' => YAC_Notification_Service::all($user_id),
             'timeline'      => YAC_Timeline_Service::all($user_id),
+            'orders'        => YAC_Order_Service::all($user_id),
+            'tutor_requests' => $this->get_tutor_requests($user_id),
         ]);
 
     }
@@ -118,9 +121,11 @@ class YAC_Dashboard_Controller extends YAC_REST_Controller {
             'profile'             => YAC_Profile_Service::get_by_user_id($user_id),
             'consulting_requests' => YAC_Consulting_Service::all($user_id),
             'payments'            => YAC_Payment_Service::all($user_id),
-            'resources'           => YAC_Resource_Service::all(),
+            'resources'           => YAC_Resource_Service::all($user_id),
             'notifications'       => YAC_Notification_Service::all($user_id),
             'timeline'            => YAC_Timeline_Service::all($user_id),
+            'orders'              => YAC_Order_Service::all($user_id),
+            'procurements'        => YAC_Procurement_Service::all($user_id),
         ]);
 
     }
@@ -138,6 +143,29 @@ class YAC_Dashboard_Controller extends YAC_REST_Controller {
             'pending_tutor_requests'      => YAC_Admin_Service::pending_tutor_requests(),
             'pending_consulting_requests' => YAC_Admin_Service::pending_consulting_requests(),
         ]);
+
+    }
+
+    /**
+     * Get all tutor requests for a user.
+     *
+     * @param int $user_id
+     * @return array
+     */
+    private function get_tutor_requests($user_id) {
+
+        global $wpdb;
+
+        return $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT *
+                 FROM " . YAC_Tutor_Requests_Table::table_name() . "
+                 WHERE user_id = %d
+                 ORDER BY created_at DESC",
+                $user_id
+            ),
+            ARRAY_A
+        );
 
     }
 }

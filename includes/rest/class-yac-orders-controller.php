@@ -213,29 +213,14 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
      */
     public function get_orders(WP_REST_Request $request) {
 
-        global $wpdb;
-
-        $table = YAC_Orders_Table::table_name();
-
         $user_id = YAC_Auth_Helper::user_id();
 
         if (!$user_id) {
             return $this->error('Unauthorized.', 401);
         }
 
-        $orders = $wpdb->get_results(
-            $wpdb->prepare(
-                "SELECT *
-                 FROM {$table}
-                 WHERE user_id = %d
-                 ORDER BY created_at DESC",
-                $user_id
-            ),
-            ARRAY_A
-        );
-
         return $this->success([
-            'orders' => $orders,
+            'orders' => YAC_Order_Service::all($user_id),
         ]);
 
     }
@@ -286,21 +271,8 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
             return $this->error('Order not found.', 404);
         }
 
-        $order['currency'] = get_woocommerce_currency();
-
-        $order['payment_id'] = !empty($order['payment_id'])
-            ? (int) $order['payment_id']
-            : null;
-
-        $order['has_pop'] = !empty($order['has_pop'])
-            ? (int) $order['has_pop']
-            : 0;
-
-        $order['related_payment_status'] =
-            $order['related_payment_status'] ?: null;
-
         return $this->success([
-            'order' => $order,
+            'order' => YAC_Order_Service::format_order($order),
         ]);
 
     }

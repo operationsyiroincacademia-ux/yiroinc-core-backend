@@ -39,6 +39,8 @@ class YAC_Payments_Table extends YAC_Table {
 
             verified_by BIGINT(20) UNSIGNED DEFAULT NULL,
 
+            rejected_by BIGINT(20) UNSIGNED DEFAULT NULL,
+
             user_note TEXT DEFAULT NULL,
 
             admin_note TEXT DEFAULT NULL,
@@ -46,6 +48,10 @@ class YAC_Payments_Table extends YAC_Table {
             submitted_at DATETIME DEFAULT NULL,
 
             verified_at DATETIME DEFAULT NULL,
+
+            rejected_at DATETIME DEFAULT NULL,
+
+            rejection_reason TEXT DEFAULT NULL,
 
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -64,7 +70,9 @@ class YAC_Payments_Table extends YAC_Table {
 
             KEY payment_method (payment_method),
 
-            KEY verified_by (verified_by)
+            KEY verified_by (verified_by),
+
+            KEY rejected_by (rejected_by)
 
         ) {$charset_collate};";
 
