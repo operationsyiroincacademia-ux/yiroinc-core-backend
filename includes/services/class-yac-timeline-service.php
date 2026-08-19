@@ -79,4 +79,98 @@ class YAC_Timeline_Service extends YAC_Base_Service {
 
     }
 
+    /**
+     * Get historical payment activity events newest-first.
+     *
+     * @param int $payment_id
+     * @return array
+     */
+    public static function payment_activity($payment_id) {
+
+        global $wpdb;
+
+        $events = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT
+                    id,
+                    user_id,
+                    actor_id,
+                    event,
+                    title,
+                    description,
+                    related_type,
+                    related_id,
+                    metadata,
+                    visibility,
+                    created_at
+                 FROM " . YAC_Timeline_Table::table_name() . "
+                 WHERE related_type = %s
+                 AND related_id = %d
+                 AND event IN (
+                    'payment_created',
+                    'proof_submitted',
+                    'payment_rejected',
+                    'replacement_proof_submitted',
+                    'payment_approved',
+                    'payment_verified'
+                 )
+                 ORDER BY created_at DESC, id DESC",
+                'payment',
+                absint($payment_id)
+            ),
+            ARRAY_A
+        );
+
+        return array_map([self::class, 'format_payment_activity_event'], $events);
+
+    }
+
+    /**
+     * Check whether a payment event has already occurred.
+     *
+     * @param int $payment_id
+     * @param string $event
+     * @return bool
+     */
+    public static function payment_has_event($payment_id, $event) {
+
+        global $wpdb;
+
+        return (bool) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*)
+                 FROM " . YAC_Timeline_Table::table_name() . "
+                 WHERE related_type = %s
+                 AND related_id = %d
+                 AND event = %s",
+                'payment',
+                absint($payment_id),
+                sanitize_key($event)
+            )
+        );
+
+    }
+
+    /**
+     * Normalize payment activity event payloads.
+     *
+     * @param array $event
+     * @return array
+     */
+    private static function format_payment_activity_event($event) {
+
+        if ($event['event'] === 'payment_verified') {
+            $event['event'] = 'payment_approved';
+            $event['title'] = 'Payment Approved';
+        }
+
+        $event['id'] = (int) $event['id'];
+        $event['user_id'] = (int) $event['user_id'];
+        $event['actor_id'] = (int) $event['actor_id'];
+        $event['related_id'] = !empty($event['related_id']) ? (int) $event['related_id'] : null;
+
+        return $event;
+
+    }
+
 }

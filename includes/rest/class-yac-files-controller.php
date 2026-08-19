@@ -115,7 +115,7 @@ class YAC_Files_Controller extends YAC_REST_Controller {
          */
         $payment = $wpdb->get_row(
             $wpdb->prepare(
-                "SELECT id, user_id, order_id
+                "SELECT id, user_id, order_id, has_pop, payment_status
                  FROM " . YAC_Payments_Table::table_name() . "
                  WHERE id = %d
                  AND user_id = %d",
@@ -128,6 +128,10 @@ class YAC_Files_Controller extends YAC_REST_Controller {
         if (!$payment) {
             return $this->error('Payment not found.', 404);
         }
+
+        $is_replacement_proof =
+            $payment['payment_status'] === 'rejected' ||
+            YAC_Timeline_Service::payment_has_event($payment['id'], 'payment_rejected');
 
         /**
          * Upload the physical file.
@@ -248,6 +252,22 @@ class YAC_Files_Controller extends YAC_REST_Controller {
                 500
             );
         }
+
+        YAC_Timeline_Service::record([
+            'user_id'      => $user_id,
+            'actor_id'     => $user_id,
+            'event'        => $is_replacement_proof ? 'replacement_proof_submitted' : 'proof_submitted',
+            'title'        => $is_replacement_proof ? 'Replacement Proof Submitted' : 'Proof Submitted',
+            'description'  => $is_replacement_proof
+                ? 'Replacement proof of payment submitted and awaiting review.'
+                : 'Proof of payment submitted and awaiting review.',
+            'related_type' => 'payment',
+            'related_id'   => $related_id,
+            'metadata'     => [
+                'file_id' => $file_id,
+            ],
+            'visibility'   => 'user',
+        ]);
 
         return $this->success([
             'file_id'        => $file_id,

@@ -388,6 +388,7 @@ class YAC_Admin_Service {
             'order'    => $order ? self::format_admin_order($order) : null,
             'customer' => $customer ? self::format_admin_customer($customer) : null,
             'proof'    => self::latest_payment_proof($payment_id),
+            'activity' => YAC_Timeline_Service::payment_activity($payment_id),
         ];
 
     }

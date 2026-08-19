@@ -170,6 +170,17 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
             return $this->error('Unable to create payment.');
         }
 
+        YAC_Timeline_Service::record([
+            'user_id'      => $user_id,
+            'actor_id'     => $user_id,
+            'event'        => 'payment_created',
+            'title'        => 'Payment Created',
+            'description'  => 'Payment record created for this order.',
+            'related_type' => 'payment',
+            'related_id'   => $payment_id,
+            'visibility'   => 'user',
+        ]);
+
         $wpdb->update(
             YAC_Orders_Table::table_name(),
             [
@@ -327,7 +338,8 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
         }
 
         return $this->success([
-            'payment' => $payment,
+            'payment'  => $payment,
+            'activity' => YAC_Timeline_Service::payment_activity((int) $payment['id']),
         ]);
 
     }
@@ -393,9 +405,9 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
         YAC_Timeline_Service::record([
             'user_id'      => $payment['user_id'],
             'actor_id'     => $admin_id,
-            'event'        => 'payment_verified',
-            'title'        => 'Payment Verified',
-            'description'  => 'Your payment has been verified successfully.',
+            'event'        => 'payment_approved',
+            'title'        => 'Payment Approved',
+            'description'  => 'Your payment has been approved successfully.',
             'related_type' => 'payment',
             'related_id'   => $request['id'],
             'visibility'   => 'user',
