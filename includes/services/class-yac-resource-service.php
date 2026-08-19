@@ -233,29 +233,23 @@ class YAC_Resource_Service {
 
         global $wpdb;
 
-        $updated = $wpdb->update(
-            YAC_Files_Table::table_name(),
-            [
-                'related_id' => (int) $resource_id,
-            ],
-            [
-                'id'           => (int) $file_id,
-                'related_type' => 'resource',
-                'file_type'    => 'resource_file',
-                'related_id'   => 0,
-            ],
-            [
-                '%d',
-            ],
-            [
-                '%d',
-                '%s',
-                '%s',
-                '%d',
-            ]
+        $updated = $wpdb->query(
+            $wpdb->prepare(
+                "UPDATE " . YAC_Files_Table::table_name() . "
+                 SET related_id = %d
+                 WHERE id = %d
+                 AND related_type = %s
+                 AND file_type = %s
+                 AND related_id IN (0, %d)",
+                (int) $resource_id,
+                (int) $file_id,
+                'resource',
+                'resource_file',
+                (int) $resource_id
+            )
         );
 
-        return $updated === 1;
+        return $updated !== false;
 
     }
 
@@ -273,6 +267,271 @@ class YAC_Resource_Service {
             ),
             ARRAY_A
         );
+
+    }
+
+    public static function admin_all($args = []) {
+
+        global $wpdb;
+
+        $pagination = self::pagination_args($args);
+        $where = [];
+        $params = [];
+
+        $search = !empty($args['search'])
+            ? sanitize_text_field($args['search'])
+            : '';
+
+        if ($search !== '') {
+            $like = '%' . $wpdb->esc_like($search) . '%';
+            $where[] = '(
+                r.title LIKE %s
+                OR r.description LIKE %s
+                OR CAST(r.id AS CHAR) LIKE %s
+            )';
+            $params = array_merge($params, [$like, $like, $like]);
+        }
+
+        $exam_value = $args['exam'] ?? ($args['exam_expertise'] ?? '');
+        $exam = self::normalize_exam_filter($exam_value);
+        if ($exam_value !== null && $exam_value !== '' && $exam === '') {
+            return new WP_Error('yac_invalid_resource_exam_filter', 'Invalid resource exam filter.');
+        }
+
+        if ($exam !== '') {
+            $where[] = 'r.exam_type = %s';
+            $params[] = $exam;
+        }
+
+        $level = self::normalize_level_filter($args['level'] ?? '', $exam);
+        if (is_wp_error($level)) {
+            return $level;
+        }
+
+        if ($level !== '') {
+            $where[] = 'r.exam_level = %s';
+            $params[] = $level;
+        }
+
+        $pricing = !empty($args['pricing'])
+            ? sanitize_key($args['pricing'])
+            : '';
+
+        if ($pricing === 'free') {
+            $where[] = 'r.price <= 0';
+        } elseif ($pricing === 'paid') {
+            $where[] = 'r.price > 0';
+        } elseif ($pricing !== '') {
+            return new WP_Error('yac_invalid_resource_pricing_filter', 'Invalid resource pricing filter.');
+        }
+
+        $visibility = !empty($args['visibility'])
+            ? sanitize_key($args['visibility'])
+            : '';
+
+        if (in_array($visibility, ['public', 'published', 'visible'], true)) {
+            $where[] = 'r.is_public = 1';
+        } elseif (in_array($visibility, ['private', 'hidden', 'unpublished'], true)) {
+            $where[] = 'r.is_public = 0';
+        } elseif ($visibility !== '' && $visibility !== 'all') {
+            return new WP_Error('yac_invalid_resource_visibility_filter', 'Invalid resource visibility filter.');
+        }
+
+        $source_type = !empty($args['source_type'])
+            ? sanitize_key($args['source_type'])
+            : '';
+
+        if ($source_type !== '') {
+            if (!in_array($source_type, ['file', 'external'], true)) {
+                return new WP_Error('yac_invalid_resource_source_filter', 'Invalid resource source filter.');
+            }
+
+            $where[] = 'r.source_type = %s';
+            $params[] = $source_type;
+        }
+
+        $where_sql = !empty($where)
+            ? 'WHERE ' . implode(' AND ', $where)
+            : '';
+
+        $from_sql = "
+            FROM " . self::table() . " r
+            LEFT JOIN " . YAC_Files_Table::table_name() . " f
+                ON f.id = r.file_id
+            LEFT JOIN (
+                SELECT resource_id, COUNT(*) AS entitlement_count, COUNT(DISTINCT user_id) AS purchaser_count
+                FROM " . YAC_Resource_Entitlements_Table::table_name() . "
+                GROUP BY resource_id
+            ) ent ON ent.resource_id = r.id
+            LEFT JOIN (
+                SELECT resource_id, COUNT(*) AS order_count
+                FROM " . YAC_Orders_Table::table_name() . "
+                WHERE resource_id IS NOT NULL
+                GROUP BY resource_id
+            ) ord ON ord.resource_id = r.id
+        ";
+
+        $query = "
+            SELECT " . self::admin_select_sql() . "
+            {$from_sql}
+            {$where_sql}
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT %d OFFSET %d
+        ";
+
+        $resources = $wpdb->get_results(
+            $wpdb->prepare(
+                $query,
+                ...array_merge($params, [$pagination['per_page'], $pagination['offset']])
+            ),
+            ARRAY_A
+        );
+
+        $count_query = "
+            SELECT COUNT(*)
+            {$from_sql}
+            {$where_sql}
+        ";
+
+        $total = !empty($params)
+            ? (int) $wpdb->get_var($wpdb->prepare($count_query, ...$params))
+            : (int) $wpdb->get_var($count_query);
+
+        return [
+            'resources'  => array_map([self::class, 'format_admin'], $resources),
+            'pagination' => self::pagination_payload($pagination, $total),
+        ];
+
+    }
+
+    public static function admin_detail($id) {
+
+        global $wpdb;
+
+        $id = absint($id);
+
+        if (!$id) {
+            return new WP_Error('yac_invalid_resource_id', 'Invalid resource ID.');
+        }
+
+        $resource = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT " . self::admin_select_sql() . "
+                 FROM " . self::table() . " r
+                 LEFT JOIN " . YAC_Files_Table::table_name() . " f
+                    ON f.id = r.file_id
+                 LEFT JOIN (
+                    SELECT resource_id, COUNT(*) AS entitlement_count, COUNT(DISTINCT user_id) AS purchaser_count
+                    FROM " . YAC_Resource_Entitlements_Table::table_name() . "
+                    GROUP BY resource_id
+                 ) ent ON ent.resource_id = r.id
+                 LEFT JOIN (
+                    SELECT resource_id, COUNT(*) AS order_count
+                    FROM " . YAC_Orders_Table::table_name() . "
+                    WHERE resource_id IS NOT NULL
+                    GROUP BY resource_id
+                 ) ord ON ord.resource_id = r.id
+                 WHERE r.id = %d
+                 LIMIT 1",
+                $id
+            ),
+            ARRAY_A
+        );
+
+        if (!$resource) {
+            return new WP_Error('yac_resource_not_found', 'Resource not found.');
+        }
+
+        return [
+            'resource'      => self::format_admin($resource),
+            'relationships' => self::relationship_counts($id),
+        ];
+
+    }
+
+    public static function deactivate($id) {
+
+        global $wpdb;
+
+        $id = absint($id);
+
+        if (!$id) {
+            return new WP_Error('yac_invalid_resource_id', 'Invalid resource ID.');
+        }
+
+        $resource = self::find_raw($id);
+
+        if (!$resource) {
+            return new WP_Error('yac_resource_not_found', 'Resource not found.');
+        }
+
+        $updated = $wpdb->update(
+            self::table(),
+            [
+                'is_public'    => 0,
+                'profile_type' => null,
+                'exam_type'    => null,
+                'exam_level'   => null,
+            ],
+            [
+                'id' => $id,
+            ],
+            [
+                '%d',
+                '%s',
+                '%s',
+                '%s',
+            ],
+            [
+                '%d',
+            ]
+        );
+
+        if ($updated === false) {
+            return new WP_Error('yac_resource_deactivate_failed', 'Unable to remove resource from availability.');
+        }
+
+        return [
+            'message'       => 'Resource removed from availability.',
+            'resource_id'   => $id,
+            'deactivated'   => 1,
+            'relationships' => self::relationship_counts($id),
+        ];
+
+    }
+
+    public static function relationship_counts($resource_id) {
+
+        global $wpdb;
+
+        $resource_id = absint($resource_id);
+
+        return [
+            'orders'       => (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COUNT(*)
+                     FROM " . YAC_Orders_Table::table_name() . "
+                     WHERE resource_id = %d",
+                    $resource_id
+                )
+            ),
+            'entitlements' => (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COUNT(*)
+                     FROM " . YAC_Resource_Entitlements_Table::table_name() . "
+                     WHERE resource_id = %d",
+                    $resource_id
+                )
+            ),
+            'purchasers'   => (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COUNT(DISTINCT user_id)
+                     FROM " . YAC_Resource_Entitlements_Table::table_name() . "
+                     WHERE resource_id = %d",
+                    $resource_id
+                )
+            ),
+        ];
 
     }
 
@@ -395,6 +654,20 @@ class YAC_Resource_Service {
 
     }
 
+    private static function admin_select_sql() {
+
+        return "r.*,
+            f.original_name AS file_original_name,
+            f.file_name AS file_name,
+            f.mime_type AS file_mime_type,
+            f.file_size AS file_size,
+            f.file_type AS file_type,
+            COALESCE(ent.entitlement_count, 0) AS entitlement_count,
+            COALESCE(ent.purchaser_count, 0) AS purchaser_count,
+            COALESCE(ord.order_count, 0) AS order_count";
+
+    }
+
     private static function entitlement_join_sql($user_id) {
 
         if (!$user_id) {
@@ -502,24 +775,40 @@ class YAC_Resource_Service {
                     OR (
                         r.profile_type = %s
                         AND (
-                            r.exam_type IS NULL
-                            OR r.exam_type = ''
-                            OR r.exam_type = %s
+                            (
+                                r.exam_type IS NULL
+                                OR r.exam_type = ''
+                                OR r.exam_type = %s
+                            )
+                            AND (
+                                r.exam_level IS NULL
+                                OR r.exam_level = ''
+                                OR r.exam_level = %s
+                            )
                         )
                     )
                     OR (
                         r.profile_type = 'exam_candidate'
                         AND (
-                            r.exam_type IS NULL
-                            OR r.exam_type = ''
-                            OR r.exam_type = %s
+                            (
+                                r.exam_type IS NULL
+                                OR r.exam_type = ''
+                                OR r.exam_type = %s
+                            )
+                            AND (
+                                r.exam_level IS NULL
+                                OR r.exam_level = ''
+                                OR r.exam_level = %s
+                            )
                         )
                     )
                 )",
                 'params' => [
                     $profile_type,
                     $exam_type,
+                    self::profile_exam_level($profile),
                     $exam_type,
+                    self::profile_exam_level($profile),
                 ],
             ];
         }
@@ -530,15 +819,23 @@ class YAC_Resource_Service {
                 OR (
                     r.profile_type = %s
                     AND (
-                        r.exam_type IS NULL
-                        OR r.exam_type = ''
-                        OR r.exam_type = %s
+                        (
+                            r.exam_type IS NULL
+                            OR r.exam_type = ''
+                            OR r.exam_type = %s
+                        )
+                        AND (
+                            r.exam_level IS NULL
+                            OR r.exam_level = ''
+                            OR r.exam_level = %s
+                        )
                     )
                 )
             )",
             'params' => [
                 $profile_type,
                 $exam_type,
+                self::profile_exam_level($profile),
             ],
         ];
 
@@ -605,6 +902,7 @@ class YAC_Resource_Service {
                 : null,
             'profile_type'  => $resource['profile_type'],
             'exam_type'     => $resource['exam_type'],
+            'exam_level'    => $resource['exam_level'] ?? null,
             'is_public'     => (int) $resource['is_public'],
             'created_at'    => $resource['created_at'],
             'updated_at'    => $resource['updated_at'],
@@ -662,11 +960,19 @@ class YAC_Resource_Service {
 
     private static function resource_exam_matches_profile($resource, $profile) {
 
-        if (empty($resource['exam_type'])) {
+        if (empty($resource['exam_type']) && empty($resource['exam_level'])) {
             return true;
         }
 
-        return $resource['exam_type'] === self::profile_exam_type($profile);
+        if (!empty($resource['exam_type']) && $resource['exam_type'] !== self::profile_exam_type($profile)) {
+            return false;
+        }
+
+        if (!empty($resource['exam_level']) && $resource['exam_level'] !== self::profile_exam_level($profile)) {
+            return false;
+        }
+
+        return true;
 
     }
 
@@ -681,6 +987,153 @@ class YAC_Resource_Service {
         }
 
         return $profile['exam_type'] ?? '';
+
+    }
+
+    private static function profile_exam_level($profile) {
+
+        if (empty($profile['exam_level'])) {
+            return '';
+        }
+
+        $exam_type = self::profile_exam_type($profile);
+
+        if (class_exists('YAC_Tutor_Service')) {
+            return YAC_Tutor_Service::normalize_level($profile['exam_level'], $exam_type);
+        }
+
+        return sanitize_key($profile['exam_level']);
+
+    }
+
+    private static function format_admin($resource) {
+
+        $price = isset($resource['price']) ? (float) $resource['price'] : 0.0;
+        $file_id = !empty($resource['file_id']) ? (int) $resource['file_id'] : null;
+
+        return [
+            'id'                => (int) $resource['id'],
+            'title'             => $resource['title'],
+            'description'       => $resource['description'],
+            'category'          => $resource['category'],
+            'source_type'       => $resource['source_type'],
+            'file_id'           => $file_id,
+            'file'              => $file_id
+                ? [
+                    'file_id'       => $file_id,
+                    'file_name'     => $resource['file_name'] ?? null,
+                    'original_name' => $resource['file_original_name'] ?? null,
+                    'mime_type'     => $resource['file_mime_type'] ?? null,
+                    'file_size'     => isset($resource['file_size']) && $resource['file_size'] !== null
+                        ? (int) $resource['file_size']
+                        : null,
+                    'download_url'  => rest_url('yac/v1/files/' . $file_id . '/download'),
+                ]
+                : null,
+            'external_url'      => $resource['external_url'],
+            'price'             => $price,
+            'currency'          => $resource['currency'] ?? get_option('yac_bank_currency', 'NGN'),
+            'is_paid'           => $price > 0 ? 1 : 0,
+            'profile_type'      => $resource['profile_type'],
+            'exam_type'         => $resource['exam_type'],
+            'exam_level'        => $resource['exam_level'] ?? null,
+            'is_public'         => (int) $resource['is_public'],
+            'visibility'        => !empty($resource['is_public']) ? 'public' : 'private',
+            'created_at'        => $resource['created_at'],
+            'updated_at'        => $resource['updated_at'],
+            'entitlement_count' => isset($resource['entitlement_count'])
+                ? (int) $resource['entitlement_count']
+                : 0,
+            'purchaser_count'   => isset($resource['purchaser_count'])
+                ? (int) $resource['purchaser_count']
+                : 0,
+            'order_count'       => isset($resource['order_count'])
+                ? (int) $resource['order_count']
+                : 0,
+        ];
+
+    }
+
+    private static function pagination_args($args) {
+
+        $page = !empty($args['page'])
+            ? max(1, absint($args['page']))
+            : 1;
+
+        $per_page = !empty($args['per_page'])
+            ? max(1, absint($args['per_page']))
+            : 20;
+
+        if ($per_page > 100) {
+            $per_page = 100;
+        }
+
+        return [
+            'page'     => $page,
+            'per_page' => $per_page,
+            'offset'   => ($page - 1) * $per_page,
+        ];
+
+    }
+
+    private static function pagination_payload($pagination, $total) {
+
+        return [
+            'page'        => $pagination['page'],
+            'per_page'    => $pagination['per_page'],
+            'total'       => $total,
+            'total_pages' => (int) ceil($total / $pagination['per_page']),
+        ];
+
+    }
+
+    private static function normalize_exam_filter($value) {
+
+        if ($value === null || $value === '') {
+            return '';
+        }
+
+        if (class_exists('YAC_Tutor_Service')) {
+            return YAC_Tutor_Service::normalize_exam($value);
+        }
+
+        $value = strtoupper(sanitize_text_field((string) $value));
+
+        if (strpos($value, 'CFA') !== false) {
+            return 'CFA';
+        }
+
+        if (strpos($value, 'FRM') !== false) {
+            return 'FRM';
+        }
+
+        return '';
+
+    }
+
+    private static function normalize_level_filter($value, $exam = '') {
+
+        if ($value === null || $value === '') {
+            return '';
+        }
+
+        $level = class_exists('YAC_Tutor_Service')
+            ? YAC_Tutor_Service::normalize_level($value, $exam ?: null)
+            : sanitize_key($value);
+
+        if ($level === '') {
+            return new WP_Error('yac_invalid_resource_level_filter', 'Invalid resource level filter.');
+        }
+
+        if ($exam === 'CFA' && !in_array($level, ['level_1', 'level_2', 'level_3'], true)) {
+            return new WP_Error('yac_invalid_resource_level_filter', 'Level filter is incompatible with CFA.');
+        }
+
+        if ($exam === 'FRM' && !in_array($level, ['part_1', 'part_2'], true)) {
+            return new WP_Error('yac_invalid_resource_level_filter', 'Level filter is incompatible with FRM.');
+        }
+
+        return $level;
 
     }
 

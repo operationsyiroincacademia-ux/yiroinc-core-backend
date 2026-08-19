@@ -57,6 +57,45 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             ]
         );
 
+        register_rest_route(
+            $this->namespace,
+            '/admin/resources',
+            [
+                [
+                    'methods'             => WP_REST_Server::READABLE,
+                    'callback'            => [$this, 'admin_get_resources'],
+                    'permission_callback' => [YAC_Auth_Helper::class, 'authorize_admin'],
+                ],
+                [
+                    'methods'             => WP_REST_Server::CREATABLE,
+                    'callback'            => [$this, 'create_resource'],
+                    'permission_callback' => [YAC_Auth_Helper::class, 'authorize_admin'],
+                ],
+            ]
+        );
+
+        register_rest_route(
+            $this->namespace,
+            '/admin/resources/(?P<id>\d+)',
+            [
+                [
+                    'methods'             => WP_REST_Server::READABLE,
+                    'callback'            => [$this, 'admin_get_resource'],
+                    'permission_callback' => [YAC_Auth_Helper::class, 'authorize_admin'],
+                ],
+                [
+                    'methods'             => WP_REST_Server::EDITABLE,
+                    'callback'            => [$this, 'update_resource'],
+                    'permission_callback' => [YAC_Auth_Helper::class, 'authorize_admin'],
+                ],
+                [
+                    'methods'             => WP_REST_Server::DELETABLE,
+                    'callback'            => [$this, 'delete_resource'],
+                    'permission_callback' => [YAC_Auth_Helper::class, 'authorize_admin'],
+                ],
+            ]
+        );
+
     }
 
     /**
@@ -85,9 +124,12 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             return $this->error('Resource created, but file could not be linked.', 500);
         }
 
+        $detail = YAC_Resource_Service::admin_detail($resource_id);
+
         return $this->success([
             'resource_id' => $resource_id,
-        ]);
+            'resource'    => is_wp_error($detail) ? null : $detail['resource'],
+        ], 201);
 
     }
 
@@ -152,8 +194,11 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             return $this->error('Resource updated, but file could not be linked.', 500);
         }
 
+        $detail = YAC_Resource_Service::admin_detail($resource_id);
+
         return $this->success([
-            'message' => 'Resource updated successfully.',
+            'message'  => 'Resource updated successfully.',
+            'resource' => is_wp_error($detail) ? null : $detail['resource'],
         ]);
 
     }
@@ -217,6 +262,76 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
 
     }
 
+    public function admin_get_resources(WP_REST_Request $request) {
+
+        $result = YAC_Resource_Service::admin_all([
+            'search'         => $request->get_param('search') ?: $request->get_param('q'),
+            'exam'           => $request->get_param('exam'),
+            'exam_expertise' => $request->get_param('exam_expertise'),
+            'level'          => $request->get_param('level'),
+            'pricing'        => $this->admin_pricing_filter($request),
+            'visibility'     => $request->get_param('visibility') ?: $request->get_param('status'),
+            'source_type'    => $request->get_param('source_type') ?: $request->get_param('resource_type'),
+            'page'           => $request->get_param('page'),
+            'per_page'       => $request->get_param('per_page'),
+        ]);
+
+        if (is_wp_error($result)) {
+            return $this->error($result->get_error_message(), 422);
+        }
+
+        return $this->success($result);
+
+    }
+
+    public function admin_get_resource(WP_REST_Request $request) {
+
+        $result = YAC_Resource_Service::admin_detail($request['id']);
+
+        if (is_wp_error($result)) {
+            return $this->error($result->get_error_message(), 404);
+        }
+
+        return $this->success($result);
+
+    }
+
+    public function delete_resource(WP_REST_Request $request) {
+
+        $result = YAC_Resource_Service::deactivate($request['id']);
+
+        if (is_wp_error($result)) {
+            return $this->error($result->get_error_message(), 422);
+        }
+
+        return $this->success($result);
+
+    }
+
+    private function admin_pricing_filter(WP_REST_Request $request) {
+
+        $pricing = $request->get_param('pricing');
+
+        if ($pricing !== null && $pricing !== '') {
+            return $pricing;
+        }
+
+        $paid = $request->get_param('paid');
+
+        if ($paid !== null && $paid !== '') {
+            return filter_var($paid, FILTER_VALIDATE_BOOLEAN) ? 'paid' : '';
+        }
+
+        $free = $request->get_param('free');
+
+        if ($free !== null && $free !== '') {
+            return filter_var($free, FILTER_VALIDATE_BOOLEAN) ? 'free' : '';
+        }
+
+        return '';
+
+    }
+
     private function prepare_resource_data(array $data, $is_update = false, $existing = null) {
 
         $required = [
@@ -261,6 +376,9 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             'exam_type'    => isset($data['exam_type'])
                 ? sanitize_text_field($data['exam_type'])
                 : null,
+            'exam_level'   => isset($data['exam_level'])
+                ? sanitize_text_field($data['exam_level'])
+                : null,
             'is_public'    => !empty($data['is_public']) ? 1 : 0,
         ];
 
@@ -285,6 +403,7 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             'category'     => 100,
             'profile_type' => 50,
             'exam_type'    => 100,
+            'exam_level'   => 100,
         ];
 
         foreach ($lengths as $field => $length) {
@@ -323,6 +442,12 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
                 'profile_type is required when exam_type is provided.',
                 422
             );
+        }
+
+        $targeting_validation = $this->validate_resource_targeting($resource);
+
+        if (is_wp_error($targeting_validation)) {
+            return $targeting_validation;
         }
 
         if ($source_type === 'file') {
@@ -402,6 +527,80 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
                 'status' => $status,
             ]
         );
+
+    }
+
+    private function validate_resource_targeting(array &$resource) {
+
+        if ($resource['exam_type'] !== null && trim((string) $resource['exam_type']) === '') {
+            $resource['exam_type'] = null;
+        }
+
+        if ($resource['exam_level'] !== null && trim((string) $resource['exam_level']) === '') {
+            $resource['exam_level'] = null;
+        }
+
+        if (!empty($resource['exam_type'])) {
+            $exam_type = class_exists('YAC_Tutor_Service')
+                ? YAC_Tutor_Service::normalize_exam($resource['exam_type'])
+                : strtoupper($resource['exam_type']);
+
+            if ($exam_type === '') {
+                return $this->validation_error('exam_type must be CFA or FRM when provided.', 422);
+            }
+
+            $resource['exam_type'] = $exam_type;
+        }
+
+        if ($resource['profile_type'] === 'cfa_candidate' && $resource['exam_type'] === 'FRM') {
+            return $this->validation_error('CFA resources cannot target FRM exam_type.', 422);
+        }
+
+        if ($resource['profile_type'] === 'frm_candidate' && $resource['exam_type'] === 'CFA') {
+            return $this->validation_error('FRM resources cannot target CFA exam_type.', 422);
+        }
+
+        $exam_context = $resource['exam_type'];
+
+        if (!$exam_context && $resource['profile_type'] === 'cfa_candidate') {
+            $exam_context = 'CFA';
+        }
+
+        if (!$exam_context && $resource['profile_type'] === 'frm_candidate') {
+            $exam_context = 'FRM';
+        }
+
+        if (!empty($resource['exam_level'])) {
+            if (!$exam_context) {
+                return $this->validation_error(
+                    'exam_type or a CFA/FRM profile_type is required when exam_level is provided.',
+                    422
+                );
+            }
+
+            $level = class_exists('YAC_Tutor_Service')
+                ? YAC_Tutor_Service::normalize_level($resource['exam_level'], $exam_context)
+                : sanitize_key($resource['exam_level']);
+
+            if ($level === '') {
+                return $this->validation_error('Invalid exam_level.', 422);
+            }
+
+            $cfa_levels = ['level_1', 'level_2', 'level_3'];
+            $frm_levels = ['part_1', 'part_2'];
+
+            if ($exam_context === 'CFA' && !in_array($level, $cfa_levels, true)) {
+                return $this->validation_error('CFA resources must use level_1, level_2, or level_3.', 422);
+            }
+
+            if ($exam_context === 'FRM' && !in_array($level, $frm_levels, true)) {
+                return $this->validation_error('FRM resources must use part_1 or part_2.', 422);
+            }
+
+            $resource['exam_level'] = $level;
+        }
+
+        return true;
 
     }
 

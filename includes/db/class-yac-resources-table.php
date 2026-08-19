@@ -51,6 +51,7 @@ class YAC_Resources_Table {
 
             profile_type VARCHAR(50) NULL,
             exam_type VARCHAR(100) NULL,
+            exam_level VARCHAR(100) NULL,
 
             is_public TINYINT(1) NOT NULL DEFAULT 0,
 
@@ -63,6 +64,7 @@ class YAC_Resources_Table {
             KEY source_type (source_type),
             KEY profile_type (profile_type),
             KEY exam_type (exam_type),
+            KEY exam_level (exam_level),
             KEY file_id (file_id)
 
         ) {$charset_collate};";
