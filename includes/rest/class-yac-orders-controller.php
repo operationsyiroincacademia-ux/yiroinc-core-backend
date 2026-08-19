@@ -479,7 +479,14 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
             return $this->error('Order not found.', 404);
         }
 
-        $validation = $this->validate_digital_resource_payment($order);
+        if (
+            $order['order_status'] === 'completed' ||
+            $order['fulfillment_status'] === 'fulfilled'
+        ) {
+            return $this->error('Order has already been fulfilled.', 409);
+        }
+
+        $validation = $this->validate_order_payment_verified($order);
 
         if (is_wp_error($validation)) {
             return $this->error($validation->get_error_message(), 422);
@@ -488,10 +495,18 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
         $updated = $wpdb->update(
             YAC_Orders_Table::table_name(),
             [
+                'order_status'       => 'completed',
                 'fulfillment_status' => 'fulfilled',
             ],
             [
                 'id' => $request['id'],
+            ],
+            [
+                '%s',
+                '%s',
+            ],
+            [
+                '%d',
             ]
         );
 
@@ -504,6 +519,19 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
         if ($entitlement === false || is_wp_error($entitlement)) {
             return $this->error('Order fulfilled, but resource access could not be granted.', 500);
         }
+
+        $admin_id = YAC_Auth_Helper::user_id();
+
+        YAC_Timeline_Service::record([
+            'user_id'      => $order['user_id'],
+            'actor_id'     => $admin_id,
+            'event'        => 'order_fulfilled',
+            'title'        => 'Order Fulfilled',
+            'description'  => 'Your order has been fulfilled.',
+            'related_type' => 'order',
+            'related_id'   => $request['id'],
+            'visibility'   => 'user',
+        ]);
 
         YAC_Notification_Service::create([
             'user_id'      => $order['user_id'],
@@ -518,6 +546,24 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
         return $this->success([
             'message' => 'Order fulfilled successfully.',
         ]);
+
+    }
+
+    private function validate_order_payment_verified($order) {
+
+        $payment = YAC_Resource_Service::verified_payment_for_order(
+            $order['id'],
+            $order['user_id']
+        );
+
+        if (!$payment) {
+            return new WP_Error(
+                'yac_payment_not_verified',
+                'Cannot fulfil an order before payment is verified.'
+            );
+        }
+
+        return true;
 
     }
 

@@ -554,6 +554,7 @@ class YAC_Admin_Service {
             'all',
             'awaiting_payment',
             'paid',
+            'completed',
         ];
 
         if (!in_array($status, $allowed_statuses, true)) {
@@ -566,8 +567,12 @@ class YAC_Admin_Service {
 
         if ($status === 'awaiting_payment') {
             $where[] = 'COALESCE(p.has_pop, 0) = 0';
+            $where[] = "o.order_status != 'completed'";
         } elseif ($status === 'paid') {
             $where[] = 'p.has_pop = 1';
+            $where[] = "o.order_status != 'completed'";
+        } elseif ($status === 'completed') {
+            $where[] = "o.order_status = 'completed'";
         }
 
         $search = !empty($args['search'])
@@ -1250,12 +1255,19 @@ class YAC_Admin_Service {
     /**
      * Admin-facing order status derived from POP submission.
      *
+     * @param array $order
      * @param array|null $payment
      * @return string
      */
-    private static function admin_order_status($payment) {
+    private static function admin_order_status($order, $payment = null) {
 
-        return !empty($payment['has_pop'])
+        if (($order['order_status'] ?? null) === 'completed') {
+            return 'completed';
+        }
+
+        $payment_context = $payment ?: $order;
+
+        return !empty($payment_context['has_pop'])
             ? 'paid'
             : 'awaiting_payment';
 
@@ -1374,7 +1386,7 @@ class YAC_Admin_Service {
             'total_price'           => (float) $order['total_price'],
             'currency'              => $order['currency'],
             'order_status'          => $order['order_status'],
-            'admin_order_status'    => self::admin_order_status($payment),
+            'admin_order_status'    => self::admin_order_status($order, $payment),
             'payment_status'        => $order['payment_status'],
             'fulfillment_status'    => $order['fulfillment_status'],
             'customer_note'         => $order['customer_note'],
