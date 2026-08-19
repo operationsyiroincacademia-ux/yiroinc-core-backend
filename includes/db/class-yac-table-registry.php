@@ -12,6 +12,7 @@ require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-files-table.php';
 require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-notifications-table.php';
 require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-timeline-table.php';
 require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-audit-logs-table.php';
+require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-tutors-table.php';
 require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-tutor-requests-table.php';
 require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-consulting-requests-table.php';
 require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-procurements-table.php';
@@ -39,6 +40,7 @@ class YAC_Table_Registry {
             YAC_Notifications_Table::class,
             YAC_Timeline_Table::class,
             YAC_Audit_Logs_Table::class,
+            YAC_Tutors_Table::class,
             YAC_Tutor_Requests_Table::class,
             YAC_Consulting_Requests_Table::class,
             YAC_Procurements_Table::class,

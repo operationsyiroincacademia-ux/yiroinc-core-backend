@@ -735,7 +735,7 @@ class YAC_Admin_Service {
                 'result_key'   => 'tutor_requests',
                 'type'         => 'tutor_request',
                 'search_cols'  => ['r.exam_type', 'r.exam_level', 'r.preferred_timezone', 'r.preferred_language', 'r.additional_notes'],
-                'select_extra' => 'r.exam_type, r.exam_level, r.preferred_timezone, r.preferred_language',
+                'select_extra' => 'r.exam_type, r.exam_level, r.preferred_timezone, r.preferred_language, r.assigned_tutor_id, r.matched_at',
                 'formatter'    => [self::class, 'format_tutor_request_row'],
             ],
             $args
@@ -751,12 +751,22 @@ class YAC_Admin_Service {
      */
     public static function tutor_request_detail($request_id) {
 
-        return self::request_detail(
+        $detail = self::request_detail(
             YAC_Tutor_Requests_Table::table_name(),
             'tutor_request',
             $request_id,
             [self::class, 'format_tutor_request_detail']
         );
+
+        if (is_wp_error($detail)) {
+            return $detail;
+        }
+
+        $detail['tutor'] = !empty($detail['request']['assigned_tutor_id'])
+            ? YAC_Tutor_Service::format_admin(YAC_Tutor_Service::find((int) $detail['request']['assigned_tutor_id']))
+            : null;
+
+        return $detail;
 
     }
 
@@ -1565,6 +1575,9 @@ class YAC_Admin_Service {
             'exam_level'            => $request['exam_level'],
             'preferred_timezone'    => $request['preferred_timezone'],
             'preferred_language'    => $request['preferred_language'],
+            'assigned_tutor_id'     => !empty($request['assigned_tutor_id']) ? (int) $request['assigned_tutor_id'] : null,
+            'tutor_id'              => !empty($request['assigned_tutor_id']) ? (int) $request['assigned_tutor_id'] : null,
+            'matched_at'            => $request['matched_at'],
             'created_at'            => $request['created_at'],
             'updated_at'            => $request['updated_at'],
         ];
@@ -1582,6 +1595,7 @@ class YAC_Admin_Service {
         $request['id'] = (int) $request['id'];
         $request['user_id'] = (int) $request['user_id'];
         $request['assigned_tutor_id'] = !empty($request['assigned_tutor_id']) ? (int) $request['assigned_tutor_id'] : null;
+        $request['tutor_id'] = $request['assigned_tutor_id'];
         $request['matched_by'] = !empty($request['matched_by']) ? (int) $request['matched_by'] : null;
         $request['session_started_by'] = !empty($request['session_started_by']) ? (int) $request['session_started_by'] : null;
         $request['completed_by'] = !empty($request['completed_by']) ? (int) $request['completed_by'] : null;

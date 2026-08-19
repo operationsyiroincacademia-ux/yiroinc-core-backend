@@ -331,8 +331,13 @@ class YAC_Tutor_Requests_Controller extends YAC_REST_Controller {
             return $this->error('Tutor request not found.', 404);
         }
 
+        $tutor = !empty($tutor_request['assigned_tutor_id'])
+            ? YAC_Tutor_Service::find((int) $tutor_request['assigned_tutor_id'])
+            : null;
+
         return $this->success([
             'request' => $tutor_request,
+            'tutor'   => YAC_Tutor_Service::format_candidate($tutor),
         ]);
 
     }
@@ -351,23 +356,49 @@ class YAC_Tutor_Requests_Controller extends YAC_REST_Controller {
         }
 
         $data = $request->get_json_params();
+        $data = is_array($data) ? $data : [];
 
-        $validation = YAC_Validation_Service::required($data, 'assigned_tutor_id');
+        $allowed_statuses = ['pending', 'matched', 'in_progress'];
+
+        if (!in_array($tutor_request['status'], $allowed_statuses, true)) {
+            return $this->error('Tutor can only be matched while the request is pending, matched, or in progress.', 409);
+        }
+
+        $tutor_id = isset($data['tutor_id'])
+            ? $data['tutor_id']
+            : ($data['assigned_tutor_id'] ?? null);
+
+        $validation = YAC_Validation_Service::required(['tutor_id' => $tutor_id], 'tutor_id');
 
         if (is_wp_error($validation)) {
             return $validation;
         }
 
-        $validation = YAC_Validation_Service::numeric($data['assigned_tutor_id']);
+        $validation = YAC_Validation_Service::numeric($tutor_id);
 
         if (is_wp_error($validation)) {
             return $validation;
         }
 
-        $assigned_tutor_id = (int) $data['assigned_tutor_id'];
+        $assigned_tutor_id = (int) $tutor_id;
+        $tutor = YAC_Tutor_Service::find($assigned_tutor_id);
+        $match_validation = YAC_Tutor_Service::validate_match($tutor, $tutor_request);
 
-        if ($assigned_tutor_id < 1 || !get_user_by('id', $assigned_tutor_id)) {
-            return $this->error('assigned_tutor_id must be a valid user ID.', 400);
+        if (is_wp_error($match_validation)) {
+            return $this->error($match_validation->get_error_message(), 422);
+        }
+
+        $is_reassignment = !empty($tutor_request['assigned_tutor_id'])
+            && (int) $tutor_request['assigned_tutor_id'] !== $assigned_tutor_id;
+        $next_status = $tutor_request['status'] === 'in_progress' ? 'in_progress' : 'matched';
+
+        if (!$is_reassignment && !empty($tutor_request['assigned_tutor_id']) && in_array($tutor_request['status'], ['matched', 'in_progress'], true)) {
+            return $this->success([
+                'message'  => 'Tutor is already matched to this request.',
+                'tutor_id' => $assigned_tutor_id,
+                'status'   => $next_status,
+                'tutor'    => YAC_Tutor_Service::format_admin($tutor),
+            ]);
         }
 
         $admin_id = YAC_Auth_Helper::user_id();
@@ -375,7 +406,7 @@ class YAC_Tutor_Requests_Controller extends YAC_REST_Controller {
         $updated = $wpdb->update(
             YAC_Tutor_Requests_Table::table_name(),
             [
-                'status'             => 'matched',
+                'status'             => $next_status,
                 'assigned_tutor_id'  => $assigned_tutor_id,
                 'matched_by'         => $admin_id,
                 'matched_at'         => current_time('mysql'),
@@ -392,14 +423,23 @@ class YAC_Tutor_Requests_Controller extends YAC_REST_Controller {
         /**
          * Timeline.
          */
+        $event = $is_reassignment ? 'tutor_reassigned' : 'tutor_matched';
+        $title = $is_reassignment ? 'Tutor Reassigned' : 'Tutor Assigned';
+        $description = $is_reassignment
+            ? 'A tutor has been reassigned to your request.'
+            : 'A tutor has been assigned to your request.';
+
         YAC_Timeline_Service::record([
             'user_id'      => $tutor_request['user_id'],
             'actor_id'     => $admin_id,
-            'event'        => 'tutor_matched',
-            'title'        => 'Tutor Assigned',
-            'description'  => 'A tutor has been assigned to your request.',
+            'event'        => $event,
+            'title'        => $title,
+            'description'  => $description,
             'related_type' => 'tutor_request',
             'related_id'   => $request['id'],
+            'metadata'     => [
+                'tutor_id' => $assigned_tutor_id,
+            ],
             'visibility'   => 'user',
         ]);
 
@@ -410,8 +450,8 @@ class YAC_Tutor_Requests_Controller extends YAC_REST_Controller {
             'user_id'      => $tutor_request['user_id'],
             'related_type' => 'tutor_request',
             'related_id'   => $request['id'],
-            'title'        => 'Tutor Assigned',
-            'message'      => 'A tutor has been assigned to your request.',
+            'title'        => $title,
+            'message'      => $description,
             'type'         => 'info',
             'action_url'   => '/tutor-requests/' . $request['id'],
         ]);
@@ -422,14 +462,17 @@ class YAC_Tutor_Requests_Controller extends YAC_REST_Controller {
         YAC_Audit_Service::record([
             'user_id'      => $tutor_request['user_id'],
             'actor_id'     => $admin_id,
-            'action'       => 'tutor_matched',
+            'action'       => $event,
             'entity_type'  => 'tutor_request',
             'entity_id'    => $request['id'],
-            'description'  => 'Tutor assigned to request.',
+            'description'  => $description,
         ]);
 
         return $this->success([
-            'message' => 'Tutor matched successfully.',
+            'message'  => $is_reassignment ? 'Tutor reassigned successfully.' : 'Tutor matched successfully.',
+            'tutor_id' => $assigned_tutor_id,
+            'status'   => $next_status,
+            'tutor'    => YAC_Tutor_Service::format_admin($tutor),
         ]);
 
     }

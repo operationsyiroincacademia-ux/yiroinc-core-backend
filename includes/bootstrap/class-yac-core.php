@@ -59,6 +59,7 @@ class YAC_Core {
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-validation-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-profile-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-resource-service.php';
+        require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-tutor-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-admin-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-procurement-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-consulting-service.php';
@@ -73,6 +74,7 @@ class YAC_Core {
         require_once YAC_PLUGIN_DIR . 'includes/rest/class-yac-payments-controller.php';
         require_once YAC_PLUGIN_DIR . 'includes/rest/class-yac-profiles-controller.php';
         require_once YAC_PLUGIN_DIR . 'includes/rest/class-yac-files-controller.php';
+        require_once YAC_PLUGIN_DIR . 'includes/rest/class-yac-tutors-controller.php';
         require_once YAC_PLUGIN_DIR . 'includes/rest/class-yac-tutor-requests-controller.php';
         require_once YAC_PLUGIN_DIR . 'includes/rest/class-yac-consulting-requests-controller.php';
         require_once YAC_PLUGIN_DIR . 'includes/rest/class-yac-procurements-controller.php';
@@ -98,6 +100,7 @@ class YAC_Core {
         (new YAC_Payments_Controller())->register_routes();
         (new YAC_Profiles_Controller())->register_routes();
         (new YAC_Files_Controller())->register_routes();
+        (new YAC_Tutors_Controller())->register_routes();
         (new YAC_Tutor_Requests_Controller())->register_routes();
         (new YAC_Consulting_Requests_Controller())->register_routes();
         (new YAC_Procurements_Controller())->register_routes();
