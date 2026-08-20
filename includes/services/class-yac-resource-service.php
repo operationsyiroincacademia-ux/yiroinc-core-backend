@@ -27,6 +27,9 @@ class YAC_Resource_Service {
 
         global $wpdb;
 
+        $audiences = $data['_audiences'] ?? [];
+        unset($data['_audiences']);
+
         $inserted = $wpdb->insert(
             self::table(),
             $data
@@ -36,7 +39,90 @@ class YAC_Resource_Service {
             return false;
         }
 
-        return $wpdb->insert_id;
+        $resource_id = (int) $wpdb->insert_id;
+
+        if (!self::sync_audiences($resource_id, $audiences)) {
+            return false;
+        }
+
+        return $resource_id;
+
+    }
+
+    public static function update($id, array $data) {
+
+        global $wpdb;
+
+        $id = absint($id);
+        $audiences = $data['_audiences'] ?? null;
+        unset($data['_audiences']);
+
+        $updated = $wpdb->update(
+            self::table(),
+            $data,
+            [
+                'id' => $id,
+            ]
+        );
+
+        if ($updated === false) {
+            return false;
+        }
+
+        if ($audiences !== null && !self::sync_audiences($id, $audiences)) {
+            return false;
+        }
+
+        return true;
+
+    }
+
+    public static function sync_audiences($resource_id, array $audiences) {
+
+        global $wpdb;
+
+        $resource_id = absint($resource_id);
+        $audiences = self::normalize_audiences($audiences);
+
+        if (!$resource_id || empty($audiences)) {
+            return false;
+        }
+
+        $table = YAC_Resource_Audiences_Table::table_name();
+
+        $deleted = $wpdb->delete(
+            $table,
+            [
+                'resource_id' => $resource_id,
+            ],
+            [
+                '%d',
+            ]
+        );
+
+        if ($deleted === false) {
+            return false;
+        }
+
+        foreach ($audiences as $audience) {
+            $inserted = $wpdb->insert(
+                $table,
+                [
+                    'resource_id' => $resource_id,
+                    'audience'    => $audience,
+                ],
+                [
+                    '%d',
+                    '%s',
+                ]
+            );
+
+            if ($inserted === false) {
+                return false;
+            }
+        }
+
+        return true;
 
     }
 
@@ -56,6 +142,7 @@ class YAC_Resource_Service {
             FROM " . self::table() . " r
             LEFT JOIN " . YAC_Files_Table::table_name() . " f
                 ON f.id = r.file_id
+            " . self::audience_join_sql() . "
             " . self::entitlement_join_sql($user_id) . "
             {$where['sql']}
             ORDER BY r.created_at DESC";
@@ -88,6 +175,7 @@ class YAC_Resource_Service {
                     AND e.user_id = %d
                  LEFT JOIN " . YAC_Files_Table::table_name() . " f
                     ON f.id = r.file_id
+                 " . self::audience_join_sql() . "
                  WHERE (
                     r.source_type != 'file'
                     OR r.file_id IS NOT NULL
@@ -131,6 +219,7 @@ class YAC_Resource_Service {
                  FROM " . self::table() . " r
                  LEFT JOIN " . YAC_Files_Table::table_name() . " f
                     ON f.id = r.file_id
+                 " . self::audience_join_sql() . "
                  " . self::entitlement_join_sql($user_id) . "
                  WHERE r.id = %d
                  {$where['and_sql']}",
@@ -157,6 +246,7 @@ class YAC_Resource_Service {
                  FROM " . self::table() . " r
                  LEFT JOIN " . YAC_Files_Table::table_name() . " f
                     ON f.id = r.file_id
+                 " . self::audience_join_sql() . "
                  " . self::entitlement_join_sql($user_id) . "
                  WHERE r.id = %d
                  LIMIT 1",
@@ -191,6 +281,7 @@ class YAC_Resource_Service {
                  FROM " . self::table() . " r
                  LEFT JOIN " . YAC_Files_Table::table_name() . " f
                     ON f.id = r.file_id
+                 " . self::audience_join_sql() . "
                  " . self::entitlement_join_sql($user_id) . "
                  WHERE r.file_id = %d
                  AND r.source_type = 'file'
@@ -350,6 +441,24 @@ class YAC_Resource_Service {
             $params[] = $source_type;
         }
 
+        $audience = !empty($args['audience'])
+            ? sanitize_key($args['audience'])
+            : '';
+
+        if ($audience !== '') {
+            if (!in_array($audience, self::allowed_audiences(), true)) {
+                return new WP_Error('yac_invalid_resource_audience_filter', 'Invalid resource audience filter.');
+            }
+
+            $where[] = 'EXISTS (
+                SELECT 1
+                FROM ' . YAC_Resource_Audiences_Table::table_name() . ' raf
+                WHERE raf.resource_id = r.id
+                AND raf.audience = %s
+            )';
+            $params[] = $audience;
+        }
+
         $where_sql = !empty($where)
             ? 'WHERE ' . implode(' AND ', $where)
             : '';
@@ -358,6 +467,7 @@ class YAC_Resource_Service {
             FROM " . self::table() . " r
             LEFT JOIN " . YAC_Files_Table::table_name() . " f
                 ON f.id = r.file_id
+            " . self::audience_join_sql() . "
             LEFT JOIN (
                 SELECT resource_id, COUNT(*) AS entitlement_count, COUNT(DISTINCT user_id) AS purchaser_count
                 FROM " . YAC_Resource_Entitlements_Table::table_name() . "
@@ -420,6 +530,7 @@ class YAC_Resource_Service {
                  FROM " . self::table() . " r
                  LEFT JOIN " . YAC_Files_Table::table_name() . " f
                     ON f.id = r.file_id
+                 " . self::audience_join_sql() . "
                  LEFT JOIN (
                     SELECT resource_id, COUNT(*) AS entitlement_count, COUNT(DISTINCT user_id) AS purchaser_count
                     FROM " . YAC_Resource_Entitlements_Table::table_name() . "
@@ -491,6 +602,16 @@ class YAC_Resource_Service {
             return new WP_Error('yac_resource_deactivate_failed', 'Unable to remove resource from availability.');
         }
 
+        $wpdb->delete(
+            YAC_Resource_Audiences_Table::table_name(),
+            [
+                'resource_id' => $id,
+            ],
+            [
+                '%d',
+            ]
+        );
+
         return [
             'message'       => 'Resource removed from availability.',
             'resource_id'   => $id,
@@ -532,6 +653,24 @@ class YAC_Resource_Service {
                 )
             ),
         ];
+
+    }
+
+    public static function audiences_for_resource($resource_id) {
+
+        global $wpdb;
+
+        $audiences = $wpdb->get_col(
+            $wpdb->prepare(
+                "SELECT audience
+                 FROM " . YAC_Resource_Audiences_Table::table_name() . "
+                 WHERE resource_id = %d
+                 ORDER BY audience ASC",
+                absint($resource_id)
+            )
+        );
+
+        return self::normalize_audiences($audiences);
 
     }
 
@@ -647,6 +786,7 @@ class YAC_Resource_Service {
             f.mime_type AS file_mime_type,
             f.file_size AS file_size,
             f.file_type AS file_type,
+            aud.audiences_csv AS audiences_csv,
             e.id AS entitlement_id,
             e.order_id AS entitlement_order_id,
             e.payment_id AS entitlement_payment_id,
@@ -662,9 +802,20 @@ class YAC_Resource_Service {
             f.mime_type AS file_mime_type,
             f.file_size AS file_size,
             f.file_type AS file_type,
+            aud.audiences_csv AS audiences_csv,
             COALESCE(ent.entitlement_count, 0) AS entitlement_count,
             COALESCE(ent.purchaser_count, 0) AS purchaser_count,
             COALESCE(ord.order_count, 0) AS order_count";
+
+    }
+
+    private static function audience_join_sql() {
+
+        return "LEFT JOIN (
+            SELECT resource_id, GROUP_CONCAT(audience ORDER BY audience SEPARATOR ',') AS audiences_csv
+            FROM " . YAC_Resource_Audiences_Table::table_name() . "
+            GROUP BY resource_id
+        ) aud ON aud.resource_id = r.id";
 
     }
 
@@ -697,7 +848,7 @@ class YAC_Resource_Service {
 
         $profile = YAC_Profile_Service::get_by_user_id($user_id);
 
-        $visibility = self::visibility_sql($profile);
+        $visibility = self::combined_visibility_sql($profile);
 
         return [
             'sql'     => "WHERE (
@@ -760,7 +911,84 @@ class YAC_Resource_Service {
 
         if (!$profile) {
             return [
-                'sql'    => "r.is_public = 1",
+                'sql'    => "(
+                    r.is_public = 1
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM " . YAC_Resource_Audiences_Table::table_name() . " ran
+                        WHERE ran.resource_id = r.id
+                    )
+                )",
+                'params' => [],
+            ];
+        }
+
+        $profile_type = $profile['profile_type'];
+        $exam_type = self::profile_exam_type($profile);
+        $audience = self::profile_audience($profile_type);
+
+        if ($audience === 'exam_candidate') {
+            return [
+                'sql'    => "(
+                    EXISTS (
+                        SELECT 1
+                        FROM " . YAC_Resource_Audiences_Table::table_name() . " ra
+                        WHERE ra.resource_id = r.id
+                        AND ra.audience = 'exam_candidate'
+                    )
+                    AND (
+                        (
+                            r.exam_type IS NULL
+                            OR r.exam_type = ''
+                            OR r.exam_type = %s
+                        )
+                        AND (
+                            r.exam_level IS NULL
+                            OR r.exam_level = ''
+                            OR r.exam_level = %s
+                        )
+                    )
+                )",
+                'params' => [
+                    $exam_type,
+                    self::profile_exam_level($profile),
+                ],
+            ];
+        }
+
+        if ($audience !== '') {
+            return [
+                'sql'    => "EXISTS (
+                    SELECT 1
+                    FROM " . YAC_Resource_Audiences_Table::table_name() . " ra
+                    WHERE ra.resource_id = r.id
+                    AND ra.audience = %s
+                )",
+                'params' => [
+                    $audience,
+                ],
+            ];
+        }
+
+        return [
+            'sql'    => "r.is_public = 1",
+            'params' => [],
+        ];
+
+    }
+
+    private static function legacy_visibility_sql($profile) {
+
+        if (!$profile) {
+            return [
+                'sql'    => "(
+                    r.is_public = 1
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM " . YAC_Resource_Audiences_Table::table_name() . " ranl
+                        WHERE ranl.resource_id = r.id
+                    )
+                )",
                 'params' => [],
             ];
         }
@@ -771,9 +999,13 @@ class YAC_Resource_Service {
         if (in_array($profile_type, ['cfa_candidate', 'frm_candidate'], true)) {
             return [
                 'sql'    => "(
-                    r.is_public = 1
-                    OR (
+                    (
                         r.profile_type = %s
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM " . YAC_Resource_Audiences_Table::table_name() . " ra0
+                            WHERE ra0.resource_id = r.id
+                        )
                         AND (
                             (
                                 r.exam_type IS NULL
@@ -789,6 +1021,11 @@ class YAC_Resource_Service {
                     )
                     OR (
                         r.profile_type = 'exam_candidate'
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM " . YAC_Resource_Audiences_Table::table_name() . " ra1
+                            WHERE ra1.resource_id = r.id
+                        )
                         AND (
                             (
                                 r.exam_type IS NULL
@@ -815,20 +1052,22 @@ class YAC_Resource_Service {
 
         return [
             'sql'    => "(
-                r.is_public = 1
-                OR (
-                    r.profile_type = %s
+                r.profile_type = %s
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM " . YAC_Resource_Audiences_Table::table_name() . " ra2
+                    WHERE ra2.resource_id = r.id
+                )
+                AND (
+                    (
+                        r.exam_type IS NULL
+                        OR r.exam_type = ''
+                        OR r.exam_type = %s
+                    )
                     AND (
-                        (
-                            r.exam_type IS NULL
-                            OR r.exam_type = ''
-                            OR r.exam_type = %s
-                        )
-                        AND (
-                            r.exam_level IS NULL
-                            OR r.exam_level = ''
-                            OR r.exam_level = %s
-                        )
+                        r.exam_level IS NULL
+                        OR r.exam_level = ''
+                        OR r.exam_level = %s
                     )
                 )
             )",
@@ -843,7 +1082,7 @@ class YAC_Resource_Service {
 
     private static function free_access_sql($profile) {
 
-        $visibility = self::visibility_sql($profile);
+        $visibility = self::combined_visibility_sql($profile);
 
         return [
             'sql'    => "(
@@ -851,6 +1090,21 @@ class YAC_Resource_Service {
                 AND r.price <= 0
             )",
             'params' => $visibility['params'],
+        ];
+
+    }
+
+    private static function combined_visibility_sql($profile) {
+
+        $visibility = self::visibility_sql($profile);
+        $legacy = self::legacy_visibility_sql($profile);
+
+        return [
+            'sql'    => "(
+                {$visibility['sql']}
+                OR {$legacy['sql']}
+            )",
+            'params' => array_merge($visibility['params'], $legacy['params']),
         ];
 
     }
@@ -901,6 +1155,7 @@ class YAC_Resource_Service {
                 ]
                 : null,
             'profile_type'  => $resource['profile_type'],
+            'audiences'     => self::resource_audiences($resource),
             'exam_type'     => $resource['exam_type'],
             'exam_level'    => $resource['exam_level'] ?? null,
             'is_public'     => (int) $resource['is_public'],
@@ -920,12 +1175,8 @@ class YAC_Resource_Service {
             return false;
         }
 
-        if (!empty($resource['is_public'])) {
-            return true;
-        }
-
-        if (!$user_id || empty($resource['profile_type'])) {
-            return false;
+        if (!$user_id) {
+            return !empty($resource['is_public']) && empty(self::resource_audiences($resource));
         }
 
         $profile = YAC_Profile_Service::get_by_user_id($user_id);
@@ -936,12 +1187,27 @@ class YAC_Resource_Service {
 
     private static function profile_matches_resource($profile, $resource) {
 
-        if (!$profile || empty($resource['profile_type'])) {
+        if (!$profile) {
             return false;
         }
 
+        $audiences = self::resource_audiences($resource);
+        $audience = self::profile_audience($profile['profile_type']);
+
+        if (!empty($audiences)) {
+            if (!in_array($audience, $audiences, true)) {
+                return false;
+            }
+
+            if ($audience === 'exam_candidate') {
+                return self::resource_exam_matches_profile($resource, $profile);
+            }
+
+            return true;
+        }
+
         $profile_type = $profile['profile_type'];
-        $resource_profile_type = $resource['profile_type'];
+        $resource_profile_type = $resource['profile_type'] ?? '';
 
         if ($profile_type === $resource_profile_type) {
             return self::resource_exam_matches_profile($resource, $profile);
@@ -1006,6 +1272,72 @@ class YAC_Resource_Service {
 
     }
 
+    public static function allowed_audiences() {
+
+        return [
+            'academic',
+            'exam_candidate',
+            'corporate',
+        ];
+
+    }
+
+    public static function normalize_audiences($audiences) {
+
+        if (!is_array($audiences)) {
+            $audiences = [$audiences];
+        }
+
+        $normalized = [];
+
+        foreach ($audiences as $audience) {
+            $audience = sanitize_key((string) $audience);
+
+            if ($audience === 'academic_user') {
+                $audience = 'academic';
+            } elseif ($audience === 'corporate_client') {
+                $audience = 'corporate';
+            } elseif (in_array($audience, ['cfa_candidate', 'frm_candidate'], true)) {
+                $audience = 'exam_candidate';
+            }
+
+            if (in_array($audience, self::allowed_audiences(), true)) {
+                $normalized[] = $audience;
+            }
+        }
+
+        return array_values(array_unique($normalized));
+
+    }
+
+    private static function resource_audiences($resource) {
+
+        if (empty($resource['audiences_csv'])) {
+            return [];
+        }
+
+        return self::normalize_audiences(explode(',', $resource['audiences_csv']));
+
+    }
+
+    private static function profile_audience($profile_type) {
+
+        if ($profile_type === 'academic_user') {
+            return 'academic';
+        }
+
+        if (in_array($profile_type, ['exam_candidate', 'cfa_candidate', 'frm_candidate'], true)) {
+            return 'exam_candidate';
+        }
+
+        if ($profile_type === 'corporate_client') {
+            return 'corporate';
+        }
+
+        return '';
+
+    }
+
     private static function format_admin($resource) {
 
         $price = isset($resource['price']) ? (float) $resource['price'] : 0.0;
@@ -1035,6 +1367,7 @@ class YAC_Resource_Service {
             'currency'          => $resource['currency'] ?? get_option('yac_bank_currency', 'NGN'),
             'is_paid'           => $price > 0 ? 1 : 0,
             'profile_type'      => $resource['profile_type'],
+            'audiences'         => self::resource_audiences($resource),
             'exam_type'         => $resource['exam_type'],
             'exam_level'        => $resource['exam_level'] ?? null,
             'is_public'         => (int) $resource['is_public'],

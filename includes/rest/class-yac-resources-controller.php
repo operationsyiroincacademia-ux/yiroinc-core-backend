@@ -138,8 +138,6 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
      */
     public function update_resource(WP_REST_Request $request) {
 
-        global $wpdb;
-
         $resource_id = absint($request['id']);
 
         if (!$resource_id) {
@@ -153,6 +151,14 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
         }
 
         $data = $request->get_json_params();
+
+        if (!array_key_exists('audiences', $data)) {
+            $current_audiences = YAC_Resource_Service::audiences_for_resource($resource_id);
+
+            if (!empty($current_audiences)) {
+                $data['audiences'] = $current_audiences;
+            }
+        }
 
         $merged = array_merge($existing, $data);
 
@@ -174,15 +180,9 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             return $resource;
         }
 
-        $updated = $wpdb->update(
-            YAC_Resources_Table::table_name(),
-            $resource,
-            [
-                'id' => $resource_id,
-            ]
-        );
+        $updated = YAC_Resource_Service::update($resource_id, $resource);
 
-        if ($updated === false) {
+        if (!$updated) {
             return $this->error('Unable to update resource.');
         }
 
@@ -272,6 +272,7 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             'pricing'        => $this->admin_pricing_filter($request),
             'visibility'     => $request->get_param('visibility') ?: $request->get_param('status'),
             'source_type'    => $request->get_param('source_type') ?: $request->get_param('resource_type'),
+            'audience'       => $request->get_param('audience'),
             'page'           => $request->get_param('page'),
             'per_page'       => $request->get_param('per_page'),
         ]);
@@ -420,14 +421,15 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
 
         }
 
-        if (!$resource['is_public'] && empty($resource['profile_type'])) {
-            return $this->validation_error(
-                'profile_type is required for non-public resources.',
-                422
-            );
+        $has_audiences = array_key_exists('audiences', $data);
+        $audiences = $this->prepare_resource_audiences($data, $resource['profile_type']);
+
+        if (is_wp_error($audiences)) {
+            return $audiences;
         }
 
         if (
+            !$has_audiences &&
             !empty($resource['profile_type']) &&
             !in_array($resource['profile_type'], $this->allowed_profile_types(), true)
         ) {
@@ -437,18 +439,18 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             );
         }
 
-        if (!empty($resource['exam_type']) && empty($resource['profile_type'])) {
-            return $this->validation_error(
-                'profile_type is required when exam_type is provided.',
-                422
-            );
-        }
+        $resource['_audiences'] = $audiences;
 
-        $targeting_validation = $this->validate_resource_targeting($resource);
+        $targeting_validation = $this->validate_resource_targeting($resource, $audiences);
 
         if (is_wp_error($targeting_validation)) {
             return $targeting_validation;
         }
+
+        $resource['profile_type'] = $this->profile_type_for_audiences(
+            $audiences,
+            $resource['exam_type']
+        );
 
         if ($source_type === 'file') {
             return $this->prepare_file_resource($data, $resource, $is_update, $existing);
@@ -530,7 +532,39 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
 
     }
 
-    private function validate_resource_targeting(array &$resource) {
+    private function prepare_resource_audiences(array $data, $legacy_profile_type = null) {
+
+        if (array_key_exists('audiences', $data)) {
+            $raw_audiences = is_array($data['audiences'])
+                ? $data['audiences']
+                : [$data['audiences']];
+
+            $audiences = YAC_Resource_Service::normalize_audiences($raw_audiences);
+
+            if (count($audiences) !== count(array_unique(array_map('sanitize_key', $raw_audiences)))) {
+                return $this->validation_error('Unsupported resource audience.', 422);
+            }
+
+            if (empty($audiences)) {
+                return $this->validation_error('At least one resource audience is required.', 422);
+            }
+
+            return $audiences;
+        }
+
+        if (!empty($legacy_profile_type)) {
+            $audiences = YAC_Resource_Service::normalize_audiences([$legacy_profile_type]);
+
+            if (!empty($audiences)) {
+                return $audiences;
+            }
+        }
+
+        return $this->validation_error('At least one resource audience is required.', 422);
+
+    }
+
+    private function validate_resource_targeting(array &$resource, array $audiences) {
 
         if ($resource['exam_type'] !== null && trim((string) $resource['exam_type']) === '') {
             $resource['exam_type'] = null;
@@ -538,6 +572,13 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
 
         if ($resource['exam_level'] !== null && trim((string) $resource['exam_level']) === '') {
             $resource['exam_level'] = null;
+        }
+
+        if (!in_array('exam_candidate', $audiences, true)) {
+            $resource['exam_type'] = null;
+            $resource['exam_level'] = null;
+
+            return true;
         }
 
         if (!empty($resource['exam_type'])) {
@@ -552,28 +593,12 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
             $resource['exam_type'] = $exam_type;
         }
 
-        if ($resource['profile_type'] === 'cfa_candidate' && $resource['exam_type'] === 'FRM') {
-            return $this->validation_error('CFA resources cannot target FRM exam_type.', 422);
-        }
-
-        if ($resource['profile_type'] === 'frm_candidate' && $resource['exam_type'] === 'CFA') {
-            return $this->validation_error('FRM resources cannot target CFA exam_type.', 422);
-        }
-
         $exam_context = $resource['exam_type'];
-
-        if (!$exam_context && $resource['profile_type'] === 'cfa_candidate') {
-            $exam_context = 'CFA';
-        }
-
-        if (!$exam_context && $resource['profile_type'] === 'frm_candidate') {
-            $exam_context = 'FRM';
-        }
 
         if (!empty($resource['exam_level'])) {
             if (!$exam_context) {
                 return $this->validation_error(
-                    'exam_type or a CFA/FRM profile_type is required when exam_level is provided.',
+                    'exam_type is required when exam_level is provided.',
                     422
                 );
             }
@@ -601,6 +626,36 @@ class YAC_Resources_Controller extends YAC_REST_Controller {
         }
 
         return true;
+
+    }
+
+    private function profile_type_for_audiences(array $audiences, $exam_type = null) {
+
+        if (count($audiences) !== 1) {
+            return null;
+        }
+
+        if ($audiences[0] === 'academic') {
+            return 'academic_user';
+        }
+
+        if ($audiences[0] === 'corporate') {
+            return 'corporate_client';
+        }
+
+        if ($audiences[0] === 'exam_candidate') {
+            if ($exam_type === 'CFA') {
+                return 'cfa_candidate';
+            }
+
+            if ($exam_type === 'FRM') {
+                return 'frm_candidate';
+            }
+
+            return 'exam_candidate';
+        }
+
+        return null;
 
     }
 

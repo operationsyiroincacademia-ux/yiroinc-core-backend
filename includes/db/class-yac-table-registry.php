@@ -18,6 +18,7 @@ require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-consulting-requests-table.p
 require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-procurements-table.php';
 require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-admin-invitations-table.php';
 require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-resources-table.php';
+require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-resource-audiences-table.php';
 require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-resource-entitlements-table.php';
 
 
@@ -46,6 +47,7 @@ class YAC_Table_Registry {
             YAC_Procurements_Table::class,
             YAC_Admin_Invitations_Table::class,
             YAC_Resources_Table::class,
+            YAC_Resource_Audiences_Table::class,
             YAC_Resource_Entitlements_Table::class,
 
         ];
