@@ -234,6 +234,10 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
             return $this->error('Resource not found.', 404);
         }
 
+        if (empty($resource['is_public'])) {
+            return $this->error('Resource is not available for purchase.', 403);
+        }
+
         if (empty($resource['is_paid'])) {
             return $this->error('Resource is free and does not require an order.', 422);
         }

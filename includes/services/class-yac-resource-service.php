@@ -136,7 +136,7 @@ class YAC_Resource_Service {
 
         global $wpdb;
 
-        $where = self::catalog_where_sql($user_id);
+        $where = self::catalog_discovery_where_sql($user_id);
 
         $query = "SELECT " . self::select_sql() . "
             FROM " . self::table() . " r
@@ -872,6 +872,35 @@ class YAC_Resource_Service {
 
     }
 
+    private static function catalog_discovery_where_sql($user_id) {
+
+        if (!$user_id || user_can($user_id, 'manage_options')) {
+            return [
+                'sql'     => '',
+                'and_sql' => '',
+                'params'  => [],
+            ];
+        }
+
+        $profile = YAC_Profile_Service::get_by_user_id($user_id);
+        $visibility = self::combined_visibility_sql($profile);
+
+        return [
+            'sql'     => "WHERE {$visibility['sql']}
+            AND (
+                r.source_type != 'file'
+                OR r.file_id IS NOT NULL
+            )",
+            'and_sql' => "AND {$visibility['sql']}
+            AND (
+                r.source_type != 'file'
+                OR r.file_id IS NOT NULL
+            )",
+            'params'  => $visibility['params'],
+        ];
+
+    }
+
     private static function access_where_sql($user_id) {
 
         if (!$user_id || user_can($user_id, 'manage_options')) {
@@ -930,6 +959,8 @@ class YAC_Resource_Service {
         if ($audience === 'exam_candidate') {
             return [
                 'sql'    => "(
+                    r.is_public = 1
+                    AND
                     EXISTS (
                         SELECT 1
                         FROM " . YAC_Resource_Audiences_Table::table_name() . " ra
@@ -958,11 +989,14 @@ class YAC_Resource_Service {
 
         if ($audience !== '') {
             return [
-                'sql'    => "EXISTS (
-                    SELECT 1
-                    FROM " . YAC_Resource_Audiences_Table::table_name() . " ra
-                    WHERE ra.resource_id = r.id
-                    AND ra.audience = %s
+                'sql'    => "(
+                    r.is_public = 1
+                    AND EXISTS (
+                        SELECT 1
+                        FROM " . YAC_Resource_Audiences_Table::table_name() . " ra
+                        WHERE ra.resource_id = r.id
+                        AND ra.audience = %s
+                    )
                 )",
                 'params' => [
                     $audience,
@@ -1000,7 +1034,8 @@ class YAC_Resource_Service {
             return [
                 'sql'    => "(
                     (
-                        r.profile_type = %s
+                        r.is_public = 1
+                        AND r.profile_type = %s
                         AND NOT EXISTS (
                             SELECT 1
                             FROM " . YAC_Resource_Audiences_Table::table_name() . " ra0
@@ -1020,7 +1055,8 @@ class YAC_Resource_Service {
                         )
                     )
                     OR (
-                        r.profile_type = 'exam_candidate'
+                        r.is_public = 1
+                        AND r.profile_type = 'exam_candidate'
                         AND NOT EXISTS (
                             SELECT 1
                             FROM " . YAC_Resource_Audiences_Table::table_name() . " ra1
@@ -1052,7 +1088,8 @@ class YAC_Resource_Service {
 
         return [
             'sql'    => "(
-                r.profile_type = %s
+                r.is_public = 1
+                AND r.profile_type = %s
                 AND NOT EXISTS (
                     SELECT 1
                     FROM " . YAC_Resource_Audiences_Table::table_name() . " ra2
@@ -1177,6 +1214,10 @@ class YAC_Resource_Service {
 
         if (!$user_id) {
             return !empty($resource['is_public']) && empty(self::resource_audiences($resource));
+        }
+
+        if (empty($resource['is_public'])) {
+            return false;
         }
 
         $profile = YAC_Profile_Service::get_by_user_id($user_id);
