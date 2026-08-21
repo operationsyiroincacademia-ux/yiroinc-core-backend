@@ -37,6 +37,30 @@ class YAC_Admin_Controller extends YAC_REST_Controller {
 
         register_rest_route(
             $this->namespace,
+            '/admin/users',
+            [
+                [
+                    'methods'             => WP_REST_Server::READABLE,
+                    'callback'            => [$this, 'users'],
+                    'permission_callback' => [YAC_Auth_Helper::class, 'authorize_admin'],
+                ],
+            ]
+        );
+
+        register_rest_route(
+            $this->namespace,
+            '/admin/users/(?P<id>\d+)',
+            [
+                [
+                    'methods'             => WP_REST_Server::READABLE,
+                    'callback'            => [$this, 'user'],
+                    'permission_callback' => [YAC_Auth_Helper::class, 'authorize_admin'],
+                ],
+            ]
+        );
+
+        register_rest_route(
+            $this->namespace,
             '/admin/payments',
             [
                 [
@@ -174,6 +198,41 @@ class YAC_Admin_Controller extends YAC_REST_Controller {
         return $this->success([
             'activity' => YAC_Admin_Service::recent_activity(),
         ]);
+
+    }
+
+    /**
+     * Admin customer directory.
+     */
+    public function users(WP_REST_Request $request) {
+
+        $result = YAC_Admin_Service::users([
+            'profile_type' => $request->get_param('profile_type') ?: $request->get_param('type'),
+            'search'       => $request->get_param('search') ?: $request->get_param('q'),
+            'page'         => $request->get_param('page'),
+            'per_page'     => $request->get_param('per_page'),
+        ]);
+
+        if (is_wp_error($result)) {
+            return $this->error($result->get_error_message(), 422);
+        }
+
+        return $this->success($result);
+
+    }
+
+    /**
+     * Admin customer detail.
+     */
+    public function user(WP_REST_Request $request) {
+
+        $result = YAC_Admin_Service::user_detail($request['id']);
+
+        if (is_wp_error($result)) {
+            return $this->error($result->get_error_message(), 404);
+        }
+
+        return $this->success($result);
 
     }
 

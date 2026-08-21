@@ -130,6 +130,179 @@ class YAC_Admin_Service {
     }
 
     /**
+     * Admin customer directory.
+     *
+     * @param array $args
+     * @return array|WP_Error
+     */
+    public static function users($args = []) {
+
+        global $wpdb;
+
+        $profile_type = !empty($args['profile_type'])
+            ? sanitize_key($args['profile_type'])
+            : '';
+
+        if ($profile_type !== '' && !in_array($profile_type, self::customer_profile_types(), true)) {
+            return new WP_Error('yac_invalid_user_profile_filter', 'Invalid profile type filter.');
+        }
+
+        $pagination = self::pagination_args($args);
+        $where = [];
+        $params = [];
+        $profile_type_placeholders = implode(', ', array_fill(0, count(self::customer_profile_types()), '%s'));
+
+        $where[] = "p.profile_type IN ({$profile_type_placeholders})";
+        $params = array_merge($params, self::customer_profile_types());
+
+        if ($profile_type !== '') {
+            $where[] = 'p.profile_type = %s';
+            $params[] = $profile_type;
+        }
+
+        $search = !empty($args['search'])
+            ? sanitize_text_field($args['search'])
+            : '';
+
+        if ($search !== '') {
+            $like = '%' . $wpdb->esc_like($search) . '%';
+            $where[] = '(
+                CAST(u.ID AS CHAR) LIKE %s
+                OR u.display_name LIKE %s
+                OR u.user_email LIKE %s
+                OR fn.first_name LIKE %s
+                OR ln.last_name LIKE %s
+            )';
+            $params = array_merge($params, [$like, $like, $like, $like, $like]);
+        }
+
+        $admin_exclusion = self::admin_exclusion_sql('u');
+        $where[] = $admin_exclusion['sql'];
+        $params = array_merge($params, $admin_exclusion['params']);
+
+        $where_sql = 'WHERE ' . implode(' AND ', $where);
+        $from_sql = self::users_from_sql();
+
+        $query = "
+            SELECT
+                u.ID AS id,
+                u.display_name,
+                u.user_email,
+                u.user_registered,
+                fn.first_name,
+                ln.last_name,
+                p.id AS profile_id,
+                p.profile_type,
+                p.phone,
+                p.organization_name,
+                p.exam_type,
+                p.exam_level,
+                p.institution,
+                p.area_of_interest,
+                p.country,
+                p.created_at AS profile_created_at,
+                p.updated_at AS profile_updated_at
+            {$from_sql}
+            {$where_sql}
+            ORDER BY u.user_registered DESC, u.ID DESC
+            LIMIT %d OFFSET %d
+        ";
+
+        $users = $wpdb->get_results(
+            $wpdb->prepare(
+                $query,
+                ...array_merge($params, [$pagination['per_page'], $pagination['offset']])
+            ),
+            ARRAY_A
+        );
+
+        $count_query = "
+            SELECT COUNT(*)
+            {$from_sql}
+            {$where_sql}
+        ";
+
+        $total = (int) $wpdb->get_var($wpdb->prepare($count_query, ...$params));
+
+        return [
+            'users'      => array_map([self::class, 'format_admin_user_row'], $users),
+            'pagination' => self::pagination_payload($pagination, $total),
+        ];
+
+    }
+
+    /**
+     * Admin customer detail.
+     *
+     * @param int $user_id
+     * @return array|WP_Error
+     */
+    public static function user_detail($user_id) {
+
+        global $wpdb;
+
+        $user_id = absint($user_id);
+
+        if (!$user_id) {
+            return new WP_Error('yac_invalid_user_id', 'Invalid user ID.');
+        }
+
+        if (user_can($user_id, 'manage_options')) {
+            return new WP_Error('yac_user_not_found', 'Customer not found.');
+        }
+
+        $profile_type_placeholders = implode(', ', array_fill(0, count(self::customer_profile_types()), '%s'));
+
+        $record = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT
+                    u.ID AS id,
+                    u.display_name,
+                    u.user_email,
+                    u.user_registered,
+                    fn.first_name,
+                    ln.last_name,
+                    p.id AS profile_id,
+                    p.user_id,
+                    p.profile_type,
+                    p.phone,
+                    p.organization_name,
+                    p.exam_type,
+                    p.exam_level,
+                    p.institution,
+                    p.area_of_interest,
+                    p.country,
+                    p.created_at AS profile_created_at,
+                    p.updated_at AS profile_updated_at
+                 " . self::users_from_sql() . "
+                 WHERE u.ID = %d
+                 AND p.profile_type IN ({$profile_type_placeholders})",
+                ...array_merge([$user_id], self::customer_profile_types())
+            ),
+            ARRAY_A
+        );
+
+        if (!$record) {
+            return new WP_Error('yac_user_not_found', 'Customer not found.');
+        }
+
+        return [
+            'user'      => self::format_admin_user($record),
+            'profile'   => self::format_admin_user_profile($record),
+            'summary'   => self::user_summary_counts($user_id),
+            'orders'    => self::recent_user_orders($user_id),
+            'payments'  => self::recent_user_payments($user_id),
+            'requests'  => [
+                'tutor'       => self::recent_user_tutor_requests($user_id),
+                'consulting'  => self::recent_user_consulting_requests($user_id),
+                'procurement' => self::recent_user_procurements($user_id),
+            ],
+            'resources' => self::recent_user_resource_entitlements($user_id),
+        ];
+
+    }
+
+    /**
      * Pending payments.
      *
      * @return array
@@ -1142,6 +1315,504 @@ class YAC_Admin_Service {
             'total'       => $total,
             'total_pages' => (int) ceil($total / $pagination['per_page']),
         ];
+
+    }
+
+    /**
+     * Base SQL for customer users with their latest YiroInc profile.
+     *
+     * @return string
+     */
+    private static function users_from_sql() {
+
+        global $wpdb;
+
+        $profiles_table = YAC_Profiles_Table::table_name();
+
+        return "
+            FROM {$wpdb->users} u
+            INNER JOIN (
+                SELECT user_id, MAX(id) AS profile_id
+                FROM {$profiles_table}
+                GROUP BY user_id
+            ) latest_profile ON latest_profile.user_id = u.ID
+            INNER JOIN {$profiles_table} p
+                ON p.id = latest_profile.profile_id
+            LEFT JOIN (
+                SELECT user_id, MAX(meta_value) AS first_name
+                FROM {$wpdb->usermeta}
+                WHERE meta_key = 'first_name'
+                GROUP BY user_id
+            ) fn ON fn.user_id = u.ID
+            LEFT JOIN (
+                SELECT user_id, MAX(meta_value) AS last_name
+                FROM {$wpdb->usermeta}
+                WHERE meta_key = 'last_name'
+                GROUP BY user_id
+            ) ln ON ln.user_id = u.ID
+        ";
+
+    }
+
+    /**
+     * SQL predicate excluding WordPress admin accounts from customer directory.
+     *
+     * @param string $user_alias
+     * @return array
+     */
+    private static function admin_exclusion_sql($user_alias = 'u') {
+
+        global $wpdb;
+
+        return [
+            'sql'    => "NOT EXISTS (
+                SELECT 1
+                FROM {$wpdb->usermeta} admin_caps
+                WHERE admin_caps.user_id = {$user_alias}.ID
+                AND admin_caps.meta_key = %s
+                AND (
+                    admin_caps.meta_value LIKE %s
+                    OR admin_caps.meta_value LIKE %s
+                )
+            )",
+            'params' => [
+                $wpdb->prefix . 'capabilities',
+                '%' . $wpdb->esc_like('administrator') . '%',
+                '%' . $wpdb->esc_like('manage_options') . '%',
+            ],
+        ];
+
+    }
+
+    /**
+     * Canonical profile types represented by Admin Users.
+     *
+     * @return array
+     */
+    private static function customer_profile_types() {
+
+        return [
+            'academic_user',
+            'exam_candidate',
+            'cfa_candidate',
+            'frm_candidate',
+            'corporate_client',
+            'consulting_lead',
+        ];
+
+    }
+
+    /**
+     * Lightweight admin user row.
+     *
+     * @param array $user
+     * @return array
+     */
+    private static function format_admin_user_row($user) {
+
+        return [
+            'id'                => (int) $user['id'],
+            'display_name'      => $user['display_name'],
+            'first_name'        => $user['first_name'],
+            'last_name'         => $user['last_name'],
+            'email'             => $user['user_email'],
+            'profile_type'      => $user['profile_type'],
+            'phone'             => $user['phone'],
+            'organization_name' => $user['organization_name'],
+            'exam_type'         => $user['exam_type'],
+            'exam_level'        => $user['exam_level'],
+            'institution'       => $user['institution'],
+            'country'           => $user['country'],
+            'registered_at'     => $user['user_registered'],
+        ];
+
+    }
+
+    /**
+     * Safe WordPress account fields for admin customer detail.
+     *
+     * @param array $user
+     * @return array
+     */
+    private static function format_admin_user($user) {
+
+        return [
+            'id'            => (int) $user['id'],
+            'display_name'  => $user['display_name'],
+            'first_name'    => $user['first_name'],
+            'last_name'     => $user['last_name'],
+            'email'         => $user['user_email'],
+            'registered_at' => $user['user_registered'],
+        ];
+
+    }
+
+    /**
+     * Existing YiroInc profile fields for admin customer detail.
+     *
+     * @param array $profile
+     * @return array
+     */
+    private static function format_admin_user_profile($profile) {
+
+        return [
+            'id'                 => (int) $profile['profile_id'],
+            'user_id'            => (int) $profile['id'],
+            'profile_type'       => $profile['profile_type'],
+            'phone'              => $profile['phone'],
+            'organization_name'  => $profile['organization_name'],
+            'exam_type'          => $profile['exam_type'],
+            'exam_level'         => $profile['exam_level'],
+            'institution'        => $profile['institution'],
+            'area_of_interest'   => $profile['area_of_interest'],
+            'country'            => $profile['country'],
+            'created_at'         => $profile['profile_created_at'],
+            'updated_at'         => $profile['profile_updated_at'],
+        ];
+
+    }
+
+    /**
+     * Lightweight user activity counts.
+     *
+     * @param int $user_id
+     * @return array
+     */
+    private static function user_summary_counts($user_id) {
+
+        global $wpdb;
+
+        $user_id = absint($user_id);
+
+        return [
+            'orders'                => self::count_user_rows(YAC_Orders_Table::table_name(), $user_id),
+            'payments'              => self::count_user_rows(YAC_Payments_Table::table_name(), $user_id),
+            'resource_entitlements' => self::count_user_rows(YAC_Resource_Entitlements_Table::table_name(), $user_id),
+            'tutor_requests'        => self::count_user_rows(YAC_Tutor_Requests_Table::table_name(), $user_id),
+            'consulting_requests'   => self::count_user_rows(YAC_Consulting_Requests_Table::table_name(), $user_id),
+            'procurements'          => self::count_user_rows(YAC_Procurements_Table::table_name(), $user_id),
+        ];
+
+    }
+
+    /**
+     * Count table rows by user_id.
+     *
+     * @param string $table
+     * @param int $user_id
+     * @return int
+     */
+    private static function count_user_rows($table, $user_id) {
+
+        global $wpdb;
+
+        return (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*)
+                 FROM {$table}
+                 WHERE user_id = %d",
+                absint($user_id)
+            )
+        );
+
+    }
+
+    /**
+     * Recent orders for a customer.
+     *
+     * @param int $user_id
+     * @return array
+     */
+    private static function recent_user_orders($user_id) {
+
+        global $wpdb;
+
+        $orders = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT
+                    id,
+                    order_number,
+                    order_source,
+                    resource_id,
+                    product_name_snapshot,
+                    total_price,
+                    currency,
+                    order_status,
+                    payment_status,
+                    fulfillment_status,
+                    created_at
+                 FROM " . YAC_Orders_Table::table_name() . "
+                 WHERE user_id = %d
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 5",
+                absint($user_id)
+            ),
+            ARRAY_A
+        );
+
+        return array_map(
+            function ($order) {
+                return [
+                    'id'                    => (int) $order['id'],
+                    'order_number'          => $order['order_number'],
+                    'order_source'          => $order['order_source'],
+                    'resource_id'           => !empty($order['resource_id']) ? (int) $order['resource_id'] : null,
+                    'product_name_snapshot' => $order['product_name_snapshot'],
+                    'total_price'           => (float) $order['total_price'],
+                    'currency'              => $order['currency'],
+                    'order_status'          => $order['order_status'],
+                    'payment_status'        => $order['payment_status'],
+                    'fulfillment_status'    => $order['fulfillment_status'],
+                    'created_at'            => $order['created_at'],
+                ];
+            },
+            $orders
+        );
+
+    }
+
+    /**
+     * Recent payments for a customer.
+     *
+     * @param int $user_id
+     * @return array
+     */
+    private static function recent_user_payments($user_id) {
+
+        global $wpdb;
+
+        $payments = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT
+                    id,
+                    order_id,
+                    payment_reference,
+                    payment_method,
+                    amount_paid,
+                    currency,
+                    has_pop,
+                    payment_status,
+                    submitted_at,
+                    created_at
+                 FROM " . YAC_Payments_Table::table_name() . "
+                 WHERE user_id = %d
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 5",
+                absint($user_id)
+            ),
+            ARRAY_A
+        );
+
+        return array_map(
+            function ($payment) {
+                return [
+                    'id'                => (int) $payment['id'],
+                    'order_id'          => (int) $payment['order_id'],
+                    'payment_reference' => $payment['payment_reference'],
+                    'payment_method'    => $payment['payment_method'],
+                    'amount_paid'       => (float) $payment['amount_paid'],
+                    'currency'          => $payment['currency'],
+                    'has_pop'           => (int) $payment['has_pop'],
+                    'payment_status'    => $payment['payment_status'],
+                    'submitted_at'      => $payment['submitted_at'],
+                    'created_at'        => $payment['created_at'],
+                ];
+            },
+            $payments
+        );
+
+    }
+
+    /**
+     * Recent tutor requests for a customer.
+     *
+     * @param int $user_id
+     * @return array
+     */
+    private static function recent_user_tutor_requests($user_id) {
+
+        global $wpdb;
+
+        $requests = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT
+                    id,
+                    exam_type,
+                    exam_level,
+                    status,
+                    assigned_tutor_id,
+                    created_at
+                 FROM " . YAC_Tutor_Requests_Table::table_name() . "
+                 WHERE user_id = %d
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 5",
+                absint($user_id)
+            ),
+            ARRAY_A
+        );
+
+        return array_map(
+            function ($request) {
+                return [
+                    'id'                => (int) $request['id'],
+                    'request_type'      => 'tutor_request',
+                    'status'            => $request['status'],
+                    'exam_type'         => $request['exam_type'],
+                    'exam_level'        => $request['exam_level'],
+                    'assigned_tutor_id' => !empty($request['assigned_tutor_id']) ? (int) $request['assigned_tutor_id'] : null,
+                    'created_at'        => $request['created_at'],
+                ];
+            },
+            $requests
+        );
+
+    }
+
+    /**
+     * Recent consulting requests for a customer.
+     *
+     * @param int $user_id
+     * @return array
+     */
+    private static function recent_user_consulting_requests($user_id) {
+
+        global $wpdb;
+
+        $requests = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT
+                    id,
+                    service_type,
+                    organization_name,
+                    status,
+                    preferred_date,
+                    created_at
+                 FROM " . YAC_Consulting_Requests_Table::table_name() . "
+                 WHERE user_id = %d
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 5",
+                absint($user_id)
+            ),
+            ARRAY_A
+        );
+
+        return array_map(
+            function ($request) {
+                return [
+                    'id'                => (int) $request['id'],
+                    'request_type'      => 'consulting_request',
+                    'status'            => $request['status'],
+                    'service_type'      => $request['service_type'],
+                    'organization_name' => $request['organization_name'],
+                    'preferred_date'    => $request['preferred_date'],
+                    'created_at'        => $request['created_at'],
+                ];
+            },
+            $requests
+        );
+
+    }
+
+    /**
+     * Recent procurements for a customer.
+     *
+     * @param int $user_id
+     * @return array
+     */
+    private static function recent_user_procurements($user_id) {
+
+        global $wpdb;
+
+        $procurements = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT
+                    id,
+                    order_id,
+                    procurement_reference,
+                    supplier_name,
+                    tracking_number,
+                    courier,
+                    status,
+                    expected_delivery_date,
+                    created_at
+                 FROM " . YAC_Procurements_Table::table_name() . "
+                 WHERE user_id = %d
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 5",
+                absint($user_id)
+            ),
+            ARRAY_A
+        );
+
+        return array_map(
+            function ($procurement) {
+                return [
+                    'id'                     => (int) $procurement['id'],
+                    'request_type'           => 'procurement',
+                    'order_id'               => (int) $procurement['order_id'],
+                    'procurement_reference'  => $procurement['procurement_reference'],
+                    'supplier_name'          => $procurement['supplier_name'],
+                    'tracking_number'        => $procurement['tracking_number'],
+                    'courier'                => $procurement['courier'],
+                    'status'                 => $procurement['status'],
+                    'expected_delivery_date' => $procurement['expected_delivery_date'],
+                    'created_at'             => $procurement['created_at'],
+                ];
+            },
+            $procurements
+        );
+
+    }
+
+    /**
+     * Recent resource entitlements for a customer.
+     *
+     * @param int $user_id
+     * @return array
+     */
+    private static function recent_user_resource_entitlements($user_id) {
+
+        global $wpdb;
+
+        $resources = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT
+                    e.id AS entitlement_id,
+                    e.resource_id,
+                    e.order_id,
+                    e.payment_id,
+                    e.granted_at,
+                    r.title,
+                    r.source_type,
+                    r.price,
+                    r.currency
+                 FROM " . YAC_Resource_Entitlements_Table::table_name() . " e
+                 LEFT JOIN " . YAC_Resources_Table::table_name() . " r
+                    ON r.id = e.resource_id
+                 WHERE e.user_id = %d
+                 ORDER BY e.granted_at DESC, e.id DESC
+                 LIMIT 5",
+                absint($user_id)
+            ),
+            ARRAY_A
+        );
+
+        return array_map(
+            function ($resource) {
+                return [
+                    'entitlement_id' => (int) $resource['entitlement_id'],
+                    'resource_id'    => (int) $resource['resource_id'],
+                    'order_id'       => (int) $resource['order_id'],
+                    'payment_id'     => (int) $resource['payment_id'],
+                    'title'          => $resource['title'],
+                    'source_type'    => $resource['source_type'],
+                    'price'          => isset($resource['price']) ? (float) $resource['price'] : null,
+                    'currency'       => $resource['currency'],
+                    'granted_at'     => $resource['granted_at'],
+                ];
+            },
+            $resources
+        );
 
     }
 
