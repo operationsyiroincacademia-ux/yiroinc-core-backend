@@ -202,7 +202,7 @@ class YAC_Core {
 
     private static function allowed_cors_headers() {
 
-        return 'Authorization, Content-Type, X-WP-Nonce';
+        return 'Authorization, Content-Type, Accept, X-WP-Nonce';
 
     }
 
