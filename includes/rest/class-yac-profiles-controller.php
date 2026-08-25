@@ -133,7 +133,13 @@ class YAC_Profiles_Controller extends YAC_REST_Controller {
             return $this->error('Unauthorized.', 401);
         }
 
-        $updates = $this->prepare_profile_updates($data);
+        $profile = YAC_Profile_Service::get_by_user_id($user_id);
+
+        if (!$profile) {
+            return $this->error('Profile not found.', 404);
+        }
+
+        $updates = $this->prepare_profile_updates($data, $profile);
 
         if (is_wp_error($updates)) {
             return $updates;
@@ -158,7 +164,7 @@ class YAC_Profiles_Controller extends YAC_REST_Controller {
     /**
      * Prepare whitelisted profile updates.
      */
-    private function prepare_profile_updates(array $data) {
+    private function prepare_profile_updates(array $data, ?array $existing_profile = null) {
 
         $fields = [
             'phone'             => 50,
@@ -205,7 +211,103 @@ class YAC_Profiles_Controller extends YAC_REST_Controller {
 
         }
 
+        if ($existing_profile) {
+            $candidate_validation = $this->apply_candidate_exam_rules(
+                $updates,
+                $data,
+                $existing_profile
+            );
+
+            if (is_wp_error($candidate_validation)) {
+                return $candidate_validation;
+            }
+        }
+
         return $updates;
+
+    }
+
+    private function apply_candidate_exam_rules(array &$updates, array $data, array $profile) {
+
+        $profile_type = $profile['profile_type'] ?? '';
+        $exam_type = $this->canonical_candidate_exam_type($profile_type);
+
+        if (!$exam_type) {
+            return true;
+        }
+
+        $updates['exam_type'] = $exam_type;
+
+        if (!array_key_exists('exam_level', $data)) {
+            return true;
+        }
+
+        if ($data['exam_level'] === null) {
+            $updates['exam_level'] = null;
+            return true;
+        }
+
+        $level = $this->normalize_candidate_exam_level($data['exam_level'], $exam_type);
+
+        if ($level === '') {
+            return new WP_Error(
+                'yac_validation_error',
+                $exam_type === 'CFA'
+                    ? 'CFA candidates must use level_1, level_2, or level_3.'
+                    : 'FRM candidates must use part_1 or part_2.',
+                [
+                    'status' => 400,
+                ]
+            );
+        }
+
+        $updates['exam_level'] = $level;
+
+        return true;
+
+    }
+
+    private function canonical_candidate_exam_type($profile_type) {
+
+        if ($profile_type === 'cfa_candidate') {
+            return 'CFA';
+        }
+
+        if ($profile_type === 'frm_candidate') {
+            return 'FRM';
+        }
+
+        return '';
+
+    }
+
+    private function normalize_candidate_exam_level($value, $exam_type) {
+
+        $raw = strtolower(sanitize_text_field((string) $value));
+        $raw = str_replace(['-', ' '], '_', $raw);
+        $raw = preg_replace('/_+/', '_', $raw);
+
+        if ($exam_type === 'CFA' && strpos($raw, 'part_') !== false) {
+            return '';
+        }
+
+        if ($exam_type === 'FRM' && strpos($raw, 'level_') !== false) {
+            return '';
+        }
+
+        $level = class_exists('YAC_Tutor_Service')
+            ? YAC_Tutor_Service::normalize_level($value, $exam_type)
+            : sanitize_key($value);
+
+        if ($exam_type === 'CFA' && in_array($level, ['level_1', 'level_2', 'level_3'], true)) {
+            return $level;
+        }
+
+        if ($exam_type === 'FRM' && in_array($level, ['part_1', 'part_2'], true)) {
+            return $level;
+        }
+
+        return '';
 
     }
 
