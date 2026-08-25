@@ -108,9 +108,7 @@ class YAC_Settings_Controller extends YAC_REST_Controller {
     public function get_admin_settings(WP_REST_Request $request) {
 
         return $this->success([
-            'settings' => [
-                'bank_account' => $this->bank_account_settings(),
-            ],
+            'bank_account' => $this->bank_account_settings(),
         ]);
 
     }
@@ -159,10 +157,8 @@ class YAC_Settings_Controller extends YAC_REST_Controller {
         $this->save_bank_account_settings($updates);
 
         return $this->success([
-            'message'  => 'Settings updated successfully.',
-            'settings' => [
-                'bank_account' => $this->bank_account_settings(),
-            ],
+            'message'      => 'Settings updated successfully.',
+            'bank_account' => $this->bank_account_settings(),
         ]);
 
     }
