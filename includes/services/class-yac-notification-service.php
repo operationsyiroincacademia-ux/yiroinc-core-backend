@@ -27,6 +27,62 @@ class YAC_Notification_Service extends YAC_Base_Service {
 
     }
 
+    /**
+     * Create the same portal notification for every current administrator.
+     *
+     * @param array $data
+     * @param int   $exclude_user_id
+     * @return int
+     */
+    public static function notify_admins($data, $exclude_user_id = 0) {
+
+        $created = 0;
+
+        foreach (self::admin_user_ids() as $admin_id) {
+            if ((int) $admin_id === (int) $exclude_user_id) {
+                continue;
+            }
+
+            $notification = $data;
+            $notification['user_id'] = (int) $admin_id;
+
+            if (self::create($notification)) {
+                $created++;
+            }
+        }
+
+        return $created;
+
+    }
+
+    /**
+     * Resolve administrators by capability so notification ownership remains user-scoped.
+     *
+     * @return array
+     */
+    public static function admin_user_ids() {
+
+        global $wpdb;
+
+        $user_ids = $wpdb->get_col(
+            $wpdb->prepare(
+                "SELECT DISTINCT user_id
+                 FROM {$wpdb->usermeta}
+                 WHERE meta_key = %s
+                 AND (
+                    meta_value LIKE %s
+                    OR meta_value LIKE %s
+                 )",
+                $wpdb->prefix . 'capabilities',
+                '%' . $wpdb->esc_like('administrator') . '%',
+                '%' . $wpdb->esc_like('manage_options') . '%'
+            )
+        );
+
+        return array_values(array_unique(array_map('absint', $user_ids)));
+
+    }
+
     private static function prepare($data) {
 
         if (empty($data['user_id']) || empty($data['title']) || empty($data['message'])) {

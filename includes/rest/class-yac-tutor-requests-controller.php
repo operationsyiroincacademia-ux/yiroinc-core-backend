@@ -190,8 +190,20 @@ class YAC_Tutor_Requests_Controller extends YAC_REST_Controller {
             return $this->error('Unable to create tutor request.');
         }
 
+        $request_id = (int) $wpdb->insert_id;
+
+        YAC_Notification_Service::notify_admins([
+            'sender_id'    => $user_id,
+            'related_type' => 'tutor_request',
+            'related_id'   => $request_id,
+            'title'        => 'New Tutor Request',
+            'message'      => 'A new tutor request is awaiting review.',
+            'type'         => 'info',
+            'action_url'   => '/admin/tutor-requests/' . $request_id,
+        ], $user_id);
+
         return $this->success([
-            'request_id' => $wpdb->insert_id,
+            'request_id' => $request_id,
         ]);
 
     }

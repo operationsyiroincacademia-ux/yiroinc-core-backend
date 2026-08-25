@@ -115,7 +115,7 @@ class YAC_Files_Controller extends YAC_REST_Controller {
          */
         $payment = $wpdb->get_row(
             $wpdb->prepare(
-                "SELECT id, user_id, order_id, has_pop, payment_status
+                "SELECT id, user_id, order_id, payment_reference, has_pop, payment_status
                  FROM " . YAC_Payments_Table::table_name() . "
                  WHERE id = %d
                  AND user_id = %d",
@@ -268,6 +268,19 @@ class YAC_Files_Controller extends YAC_REST_Controller {
             ],
             'visibility'   => 'user',
         ]);
+
+        YAC_Notification_Service::notify_admins([
+            'sender_id'    => $user_id,
+            'related_type' => 'payment',
+            'related_id'   => $related_id,
+            'title'        => $is_replacement_proof ? 'Replacement POP Submitted' : 'POP Submitted',
+            'message'      => sprintf(
+                'Proof of payment for %s is awaiting verification.',
+                $payment['payment_reference']
+            ),
+            'type'         => 'info',
+            'action_url'   => '/admin/payments/' . $related_id,
+        ], $user_id);
 
         return $this->success([
             'file_id'        => $file_id,

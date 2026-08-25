@@ -205,8 +205,20 @@ class YAC_Procurements_Controller extends YAC_REST_Controller {
             return $this->error('Unable to create procurement.');
         }
 
+        $procurement_id = (int) $wpdb->insert_id;
+
+        YAC_Notification_Service::notify_admins([
+            'sender_id'    => $user_id,
+            'related_type' => 'procurement',
+            'related_id'   => $procurement_id,
+            'title'        => 'New Procurement Request',
+            'message'      => 'A new procurement request is awaiting review.',
+            'type'         => 'info',
+            'action_url'   => '/admin/procurements/' . $procurement_id,
+        ], $user_id);
+
         return $this->success([
-            'procurement_id' => $wpdb->insert_id,
+            'procurement_id' => $procurement_id,
         ]);
 
     }

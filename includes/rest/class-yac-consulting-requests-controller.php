@@ -243,8 +243,20 @@ class YAC_Consulting_Requests_Controller extends YAC_REST_Controller {
             return $this->error('Unable to create consulting request.');
         }
 
+        $request_id = (int) $wpdb->insert_id;
+
+        YAC_Notification_Service::notify_admins([
+            'sender_id'    => $user_id,
+            'related_type' => 'consulting_request',
+            'related_id'   => $request_id,
+            'title'        => 'New Consulting Request',
+            'message'      => 'A new consulting request is awaiting review.',
+            'type'         => 'info',
+            'action_url'   => '/admin/consulting-requests/' . $request_id,
+        ], $user_id);
+
         return $this->success([
-            'request_id' => $wpdb->insert_id,
+            'request_id' => $request_id,
         ]);
 
     }
