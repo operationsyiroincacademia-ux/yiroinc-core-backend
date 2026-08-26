@@ -25,6 +25,15 @@ define('YAC_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('YAC_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
 /**
+ * Composer dependencies.
+ */
+$yac_autoload = YAC_PLUGIN_DIR . 'vendor/autoload.php';
+
+if (file_exists($yac_autoload)) {
+    require_once $yac_autoload;
+}
+
+/**
  * Bootstrap Classes
  */
 require_once YAC_PLUGIN_DIR . 'includes/bootstrap/class-yac-loader.php';

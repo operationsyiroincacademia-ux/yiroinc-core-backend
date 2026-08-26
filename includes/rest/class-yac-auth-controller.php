@@ -46,6 +46,23 @@ class YAC_Auth_Controller extends YAC_REST_Controller {
         );
 
         /**
+         * Google Sign-In.
+         *
+         * POST /auth/google
+         */
+        register_rest_route(
+            $this->namespace,
+            '/auth/google',
+            [
+                [
+                    'methods'             => WP_REST_Server::CREATABLE,
+                    'callback'            => [$this, 'google'],
+                    'permission_callback' => '__return_true',
+                ],
+            ]
+        );
+
+        /**
          * Current authenticated user.
          *
          * GET /auth/me
@@ -152,6 +169,26 @@ class YAC_Auth_Controller extends YAC_REST_Controller {
             return $this->error(
                 'Invalid email or password.',
                 401
+            );
+        }
+
+        return $this->success($result);
+
+    }
+
+    /**
+     * Authenticate or register a customer with a verified Google ID token.
+     */
+    public function google(WP_REST_Request $request) {
+
+        $result = YAC_Google_Auth_Service::authenticate(
+            $request->get_json_params()
+        );
+
+        if (is_wp_error($result)) {
+            return $this->error(
+                $result->get_error_message(),
+                (int) ($result->get_error_data()['status'] ?? 400)
             );
         }
 
