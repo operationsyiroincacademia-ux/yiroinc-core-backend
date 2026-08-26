@@ -63,6 +63,40 @@ class YAC_Auth_Controller extends YAC_REST_Controller {
         );
 
         /**
+         * Forgot password.
+         *
+         * POST /auth/forgot-password
+         */
+        register_rest_route(
+            $this->namespace,
+            '/auth/forgot-password',
+            [
+                [
+                    'methods'             => WP_REST_Server::CREATABLE,
+                    'callback'            => [$this, 'forgot_password'],
+                    'permission_callback' => '__return_true',
+                ],
+            ]
+        );
+
+        /**
+         * Reset password.
+         *
+         * POST /auth/reset-password
+         */
+        register_rest_route(
+            $this->namespace,
+            '/auth/reset-password',
+            [
+                [
+                    'methods'             => WP_REST_Server::CREATABLE,
+                    'callback'            => [$this, 'reset_password'],
+                    'permission_callback' => '__return_true',
+                ],
+            ]
+        );
+
+        /**
          * Current authenticated user.
          *
          * GET /auth/me
@@ -182,6 +216,46 @@ class YAC_Auth_Controller extends YAC_REST_Controller {
     public function google(WP_REST_Request $request) {
 
         $result = YAC_Google_Auth_Service::authenticate(
+            $request->get_json_params()
+        );
+
+        if (is_wp_error($result)) {
+            return $this->error(
+                $result->get_error_message(),
+                (int) ($result->get_error_data()['status'] ?? 400)
+            );
+        }
+
+        return $this->success($result);
+
+    }
+
+    /**
+     * Start a customer password reset.
+     */
+    public function forgot_password(WP_REST_Request $request) {
+
+        $result = YAC_Password_Reset_Service::forgot_password(
+            $request->get_json_params()
+        );
+
+        if (is_wp_error($result)) {
+            return $this->error(
+                $result->get_error_message(),
+                (int) ($result->get_error_data()['status'] ?? 400)
+            );
+        }
+
+        return $this->success($result);
+
+    }
+
+    /**
+     * Complete a customer password reset.
+     */
+    public function reset_password(WP_REST_Request $request) {
+
+        $result = YAC_Password_Reset_Service::reset_password(
             $request->get_json_params()
         );
 

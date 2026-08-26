@@ -56,6 +56,7 @@ class YAC_Core {
         require_once YAC_PLUGIN_DIR . 'includes/auth/class-yac-jwt-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/auth/class-yac-auth-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/auth/class-yac-google-auth-service.php';
+        require_once YAC_PLUGIN_DIR . 'includes/auth/class-yac-password-reset-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/auth/class-yac-auth-helper.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-validation-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-profile-service.php';
