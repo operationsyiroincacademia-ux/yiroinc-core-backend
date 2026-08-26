@@ -90,6 +90,28 @@ class YAC_Auth_Service {
             );
         }
 
+        if ($data['profile_type'] === 'corporate_client') {
+            $organization_name = isset($data['organization_name'])
+                ? sanitize_text_field(trim((string) $data['organization_name']))
+                : '';
+
+            if ($organization_name === '') {
+                return new WP_Error(
+                    'missing_organization_name',
+                    'Organization name is required for corporate clients.'
+                );
+            }
+
+            if (strlen($organization_name) > 255) {
+                return new WP_Error(
+                    'invalid_organization_name',
+                    'Organization name must be 255 characters or fewer.'
+                );
+            }
+
+            $data['organization_name'] = $organization_name;
+        }
+
         if (email_exists($data['email'])) {
             return new WP_Error(
                 'email_exists',
@@ -112,10 +134,16 @@ class YAC_Auth_Service {
             return $user_id;
         }
 
-        $profile_id = YAC_Profile_Service::create([
+        $profile_data = [
             'user_id'      => $user_id,
             'profile_type' => $data['profile_type'],
-        ]);
+        ];
+
+        if ($data['profile_type'] === 'corporate_client') {
+            $profile_data['organization_name'] = $data['organization_name'];
+        }
+
+        $profile_id = YAC_Profile_Service::create($profile_data);
 
         if (!$profile_id) {
 
@@ -154,6 +182,16 @@ class YAC_Auth_Service {
 
         $is_admin = user_can($user->ID, 'manage_options');
 
+        $profile_response = [
+            'id'           => (int) $profile_id,
+            'profile_type' => $data['profile_type'],
+            'completed'    => false,
+        ];
+
+        if ($data['profile_type'] === 'corporate_client') {
+            $profile_response['organization_name'] = $data['organization_name'];
+        }
+
         return [
             'token' => $token,
             'user'  => [
@@ -167,11 +205,7 @@ class YAC_Auth_Service {
                     'manage_options' => $is_admin ? 1 : 0,
                 ],
             ],
-            'profile' => [
-                'id'           => (int) $profile_id,
-                'profile_type' => $data['profile_type'],
-                'completed'    => false,
-            ],
+            'profile' => $profile_response,
             'auth' => [
                 'is_admin'     => $is_admin ? 1 : 0,
                 'capabilities' => [
