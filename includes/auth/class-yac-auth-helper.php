@@ -45,6 +45,10 @@ class YAC_Auth_Helper {
             return false;
         }
 
+        if (YAC_Account_Deletion_Service::is_deleted_user($user->ID)) {
+            return false;
+        }
+
         return [
             'id'    => $user->ID,
             'email' => $user->user_email,

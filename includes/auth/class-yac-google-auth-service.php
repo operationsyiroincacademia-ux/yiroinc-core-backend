@@ -128,6 +128,10 @@ class YAC_Google_Auth_Service {
             return self::error('yac_google_admin_forbidden', 'Google authentication is not available for administrators.', 403);
         }
 
+        if (YAC_Account_Deletion_Service::is_deleted_user($user_id)) {
+            return self::error('yac_google_account_closed', 'This account has been closed.', 403);
+        }
+
         $profile = YAC_Profile_Service::get_by_user_id($user_id);
 
         if (!$profile || !in_array($profile['profile_type'], self::allowed_google_profile_types(), true)) {
@@ -244,6 +248,7 @@ class YAC_Google_Auth_Service {
         $meta_id = add_user_meta($user_id, self::GOOGLE_SUB_META_KEY, $sub, true);
 
         if (!$meta_id) {
+            YAC_Account_Deletion_Service::cleanup_profile_for_user($user_id);
             wp_delete_user($user_id);
 
             return self::error('yac_google_link_failed', 'Unable to link Google identity.', 500);

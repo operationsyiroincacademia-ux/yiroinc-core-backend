@@ -136,6 +136,26 @@ class YAC_Auth_Controller extends YAC_REST_Controller {
             ]
         );
 
+        /**
+         * Delete current customer account.
+         *
+         * DELETE /auth/account
+         */
+        register_rest_route(
+            $this->namespace,
+            '/auth/account',
+            [
+                [
+                    'methods'             => WP_REST_Server::DELETABLE,
+                    'callback'            => [$this, 'delete_account'],
+                    'permission_callback' => [
+                        YAC_Auth_Helper::class,
+                        'authorize',
+                    ],
+                ],
+            ]
+        );
+
     }
 
     /**
@@ -166,7 +186,7 @@ class YAC_Auth_Controller extends YAC_REST_Controller {
         if (is_wp_error($result)) {
             return $this->error(
                 $result->get_error_message(),
-                400
+                (int) ($result->get_error_data()['status'] ?? 400)
             );
         }
 
@@ -342,6 +362,33 @@ class YAC_Auth_Controller extends YAC_REST_Controller {
         return $this->success([
             'message' => 'Logged out successfully.',
         ]);
+
+    }
+
+    /**
+     * Delete current customer account.
+     */
+    public function delete_account(WP_REST_Request $request) {
+
+        $user_id = YAC_Auth_Helper::user_id();
+
+        if (!$user_id) {
+            return $this->error('Unauthorized.', 401);
+        }
+
+        $result = YAC_Account_Deletion_Service::delete_customer_account(
+            $user_id,
+            $request->get_json_params()
+        );
+
+        if (is_wp_error($result)) {
+            return $this->error(
+                $result->get_error_message(),
+                (int) ($result->get_error_data()['status'] ?? 400)
+            );
+        }
+
+        return $this->success($result);
 
     }
 

@@ -61,6 +61,7 @@ class YAC_Core {
         require_once YAC_PLUGIN_DIR . 'includes/auth/class-yac-auth-helper.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-validation-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-profile-service.php';
+        require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-account-deletion-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-resource-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-tutor-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-admin-service.php';

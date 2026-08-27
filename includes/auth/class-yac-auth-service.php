@@ -21,6 +21,10 @@ class YAC_Auth_Service {
             return false;
         }
 
+        if (YAC_Account_Deletion_Service::is_deleted_user($user->ID)) {
+            return false;
+        }
+
         if (!wp_check_password($password, $user->user_pass, $user->ID)) {
             return false;
         }
@@ -115,7 +119,10 @@ class YAC_Auth_Service {
         if (email_exists($data['email'])) {
             return new WP_Error(
                 'email_exists',
-                'Email address already exists.'
+                'Email address already exists.',
+                [
+                    'status' => 409,
+                ]
             );
         }
 

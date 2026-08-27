@@ -200,6 +200,7 @@ class YAC_Admin_Service {
                 p.institution,
                 p.area_of_interest,
                 p.country,
+                deleted_account.deleted_at AS account_deleted_at,
                 p.created_at AS profile_created_at,
                 p.updated_at AS profile_updated_at
             {$from_sql}
@@ -272,6 +273,7 @@ class YAC_Admin_Service {
                     p.institution,
                     p.area_of_interest,
                     p.country,
+                    deleted_account.deleted_at AS account_deleted_at,
                     p.created_at AS profile_created_at,
                     p.updated_at AS profile_updated_at
                  " . self::users_from_sql() . "
@@ -287,6 +289,8 @@ class YAC_Admin_Service {
         }
 
         return [
+            'account_status' => self::account_status($record),
+            'closed_at'      => self::closed_at($record),
             'user'      => self::format_admin_user($record),
             'profile'   => self::format_admin_user_profile($record),
             'summary'   => self::user_summary_counts($user_id),
@@ -299,6 +303,70 @@ class YAC_Admin_Service {
             ],
             'resources' => self::recent_user_resource_entitlements($user_id),
         ];
+
+    }
+
+    /**
+     * Close a customer account from Admin.
+     *
+     * @param int        $user_id
+     * @param array|null $data
+     * @return array|WP_Error
+     */
+    public static function close_user_account($user_id, $data) {
+
+        $admin_id = YAC_Auth_Helper::user_id();
+
+        if (!$admin_id || !user_can($admin_id, 'manage_options')) {
+            return new WP_Error(
+                'yac_admin_required',
+                'Administrator access required.',
+                [
+                    'status' => 403,
+                ]
+            );
+        }
+
+        if (!is_array($data)) {
+            $data = [];
+        }
+
+        $reason = sanitize_text_field(trim((string) ($data['reason'] ?? '')));
+
+        if ($reason === '') {
+            return new WP_Error(
+                'yac_closure_reason_required',
+                'Closure reason is required.',
+                [
+                    'status' => 422,
+                ]
+            );
+        }
+
+        if (strlen($reason) > 1000) {
+            return new WP_Error(
+                'yac_closure_reason_too_long',
+                'Closure reason must be 1000 characters or fewer.',
+                [
+                    'status' => 422,
+                ]
+            );
+        }
+
+        return YAC_Account_Deletion_Service::close_customer_account(
+            $user_id,
+            [
+                'success_message'    => 'Customer account closed successfully.',
+                'active_message'     => 'Customer account cannot be closed while there are active requests, orders, or payments.',
+                'invalid_message'    => 'Invalid customer account.',
+                'send_closure_email' => true,
+                'audit'              => [
+                    'actor_id'  => $admin_id,
+                    'closed_by' => 'admin',
+                    'reason'    => $reason,
+                ],
+            ]
+        );
 
     }
 
@@ -1350,6 +1418,12 @@ class YAC_Admin_Service {
                 WHERE meta_key = 'last_name'
                 GROUP BY user_id
             ) ln ON ln.user_id = u.ID
+            LEFT JOIN (
+                SELECT user_id, MAX(meta_value) AS deleted_at
+                FROM {$wpdb->usermeta}
+                WHERE meta_key = 'yac_account_deleted_at'
+                GROUP BY user_id
+            ) deleted_account ON deleted_account.user_id = u.ID
         ";
 
     }
@@ -1424,6 +1498,8 @@ class YAC_Admin_Service {
             'institution'       => $user['institution'],
             'country'           => $user['country'],
             'registered_at'     => $user['user_registered'],
+            'account_status'    => self::account_status($user),
+            'closed_at'         => self::closed_at($user),
         ];
 
     }
@@ -1443,7 +1519,23 @@ class YAC_Admin_Service {
             'last_name'     => $user['last_name'],
             'email'         => $user['user_email'],
             'registered_at' => $user['user_registered'],
+            'account_status' => self::account_status($user),
+            'closed_at'     => self::closed_at($user),
         ];
+
+    }
+
+    private static function account_status($user) {
+
+        return self::closed_at($user) !== null ? 'closed' : 'active';
+
+    }
+
+    private static function closed_at($user) {
+
+        $closed_at = trim((string) ($user['account_deleted_at'] ?? ''));
+
+        return $closed_at !== '' ? $closed_at : null;
 
     }
 

@@ -119,6 +119,34 @@ class YAC_Email_Service {
 
     }
 
+    /**
+     * Send a customer account closure email.
+     *
+     * @param array $context
+     * @return bool
+     */
+    public static function send_account_closed(array $context) {
+
+        $user_id = absint($context['user_id'] ?? 0);
+        $email = sanitize_email((string) ($context['email'] ?? ''));
+
+        if ($email === '' || !is_email($email)) {
+            return false;
+        }
+
+        $subject = 'Your YiroInc Academia account has been closed';
+        $body = self::account_closed_body($context);
+
+        $sent = wp_mail($email, $subject, $body);
+
+        if (!$sent) {
+            error_log('[YAC Email] Account closure email could not be sent for user ID ' . $user_id . '.');
+        }
+
+        return (bool) $sent;
+
+    }
+
     private static function payment_rejected_body(WP_User $user, array $payment, $order, $rejection_reason) {
 
         $name = self::greeting_name($user);
@@ -264,6 +292,28 @@ class YAC_Email_Service {
         $lines[] = 'YiroInc Academia';
 
         return self::body($lines);
+
+    }
+
+    private static function account_closed_body(array $context) {
+
+        $name = trim((string) ($context['first_name'] ?? ''));
+
+        if ($name === '') {
+            $name = trim((string) ($context['display_name'] ?? ''));
+        }
+
+        if ($name === '') {
+            $name = 'there';
+        }
+
+        return self::body([
+            'Hi ' . sanitize_text_field($name) . ',',
+            'Your YiroInc Academia account has been closed by an administrator.',
+            'Your access to the account has ended.',
+            'If you believe this was done in error or you need assistance, please contact YiroInc Academia support.',
+            'YiroInc Academia',
+        ]);
 
     }
 

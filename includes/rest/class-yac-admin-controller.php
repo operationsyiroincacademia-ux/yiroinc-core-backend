@@ -61,6 +61,18 @@ class YAC_Admin_Controller extends YAC_REST_Controller {
 
         register_rest_route(
             $this->namespace,
+            '/admin/users/(?P<id>\d+)/close',
+            [
+                [
+                    'methods'             => WP_REST_Server::CREATABLE,
+                    'callback'            => [$this, 'close_user'],
+                    'permission_callback' => [YAC_Auth_Helper::class, 'authorize_admin'],
+                ],
+            ]
+        );
+
+        register_rest_route(
+            $this->namespace,
             '/admin/payments',
             [
                 [
@@ -230,6 +242,27 @@ class YAC_Admin_Controller extends YAC_REST_Controller {
 
         if (is_wp_error($result)) {
             return $this->error($result->get_error_message(), 404);
+        }
+
+        return $this->success($result);
+
+    }
+
+    /**
+     * Close a customer account.
+     */
+    public function close_user(WP_REST_Request $request) {
+
+        $result = YAC_Admin_Service::close_user_account(
+            $request['id'],
+            $request->get_json_params()
+        );
+
+        if (is_wp_error($result)) {
+            return $this->error(
+                $result->get_error_message(),
+                (int) ($result->get_error_data()['status'] ?? 400)
+            );
         }
 
         return $this->success($result);

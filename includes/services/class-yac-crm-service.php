@@ -79,4 +79,48 @@ class YAC_CRM_Service {
     
         return true;
     }
+
+    /**
+     * Mark a closed customer account as unsubscribed in FluentCRM.
+     *
+     * @param string $email
+     * @param int    $user_id
+     * @return bool
+     */
+    public static function close_deleted_account_contact($email, $user_id) {
+
+        if (!function_exists('FluentCrmApi')) {
+            return false;
+        }
+
+        $email = sanitize_email((string) $email);
+
+        if ($email === '' || !is_email($email)) {
+            return false;
+        }
+
+        $contactApi = FluentCrmApi('contacts');
+        $contact = $contactApi->getContact($email);
+
+        if (!$contact) {
+            return false;
+        }
+
+        if (method_exists($contact, 'update')) {
+            $contact->update([
+                'status' => 'unsubscribed',
+            ]);
+
+            return true;
+        }
+
+        $contact->status = 'unsubscribed';
+
+        if (method_exists($contact, 'save')) {
+            return (bool) $contact->save();
+        }
+
+        return false;
+
+    }
 }
