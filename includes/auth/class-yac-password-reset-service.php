@@ -195,7 +195,7 @@ class YAC_Password_Reset_Service {
                 'A password reset was requested for your YiroInc Academia account.',
                 'Use the link below to choose a new password:',
                 $reset_link,
-                'This link expires after the normal WordPress password reset window.',
+                'For your security, this password reset link will expire after a limited time.',
                 'If you did not request this, you can safely ignore this email.',
             ]
         );
