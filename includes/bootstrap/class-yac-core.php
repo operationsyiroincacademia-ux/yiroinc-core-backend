@@ -52,6 +52,7 @@ class YAC_Core {
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-audit-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-order-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-payment-service.php';
+        require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-email-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-event-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/auth/class-yac-jwt-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/auth/class-yac-auth-service.php';

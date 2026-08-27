@@ -457,6 +457,10 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
             return $this->error('Payment not found.', 404);
         }
 
+        if ($payment['payment_status'] === 'rejected') {
+            return $this->error('Payment has already been rejected.', 409);
+        }
+
         $data = $request->get_json_params();
 
         $validation = YAC_Validation_Service::required($data, 'rejection_reason');
@@ -552,6 +556,8 @@ class YAC_Payments_Controller extends YAC_REST_Controller {
             'entity_id'    => $request['id'],
             'description'  => 'Payment rejected by administrator.',
         ]);
+
+        YAC_Email_Service::send_payment_rejected($payment, $rejection_reason);
 
         return $this->success([
             'message' => 'Payment rejected successfully.',

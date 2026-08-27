@@ -496,6 +496,14 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
             return $this->error($validation->get_error_message(), 422);
         }
 
+        if (($order['order_source'] ?? 'woocommerce_product') === 'resource') {
+            $entitlement = YAC_Resource_Service::grant_entitlement_for_order($order);
+
+            if (!$entitlement || is_wp_error($entitlement)) {
+                return $this->error('Resource access could not be granted.', 500);
+            }
+        }
+
         $updated = $wpdb->update(
             YAC_Orders_Table::table_name(),
             [
@@ -516,12 +524,6 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
 
         if ($updated === false) {
             return $this->error('Unable to fulfil order.');
-        }
-
-        $entitlement = YAC_Resource_Service::grant_entitlement_for_order($order);
-
-        if ($entitlement === false || is_wp_error($entitlement)) {
-            return $this->error('Order fulfilled, but resource access could not be granted.', 500);
         }
 
         $admin_id = YAC_Auth_Helper::user_id();
@@ -546,6 +548,8 @@ class YAC_Orders_Controller extends YAC_REST_Controller {
             'type'         => 'success',
             'action_url'   => '/orders/' . $request['id'],
         ]);
+
+        YAC_Email_Service::send_order_ready($order);
 
         return $this->success([
             'message' => 'Order fulfilled successfully.',

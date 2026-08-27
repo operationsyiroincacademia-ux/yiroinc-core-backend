@@ -480,6 +480,8 @@ class YAC_Tutor_Requests_Controller extends YAC_REST_Controller {
             'description'  => $description,
         ]);
 
+        YAC_Email_Service::send_tutor_assignment($tutor_request, $tutor, $is_reassignment);
+
         return $this->success([
             'message'  => $is_reassignment ? 'Tutor reassigned successfully.' : 'Tutor matched successfully.',
             'tutor_id' => $assigned_tutor_id,
