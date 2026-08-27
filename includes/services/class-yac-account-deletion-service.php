@@ -9,6 +9,7 @@ class YAC_Account_Deletion_Service {
     const DELETED_AT_META_KEY = 'yac_account_deleted_at';
     const DELETED_EMAIL_HASH_META_KEY = 'yac_deleted_email_hash';
     const DELETED_GOOGLE_SUB_HASH_META_KEY = 'yac_deleted_google_sub_hash';
+    const CLOSED_ACCOUNT_LOGIN_MESSAGE = 'This account has been closed and can no longer be accessed.';
 
     /**
      * Close the currently authenticated customer account.

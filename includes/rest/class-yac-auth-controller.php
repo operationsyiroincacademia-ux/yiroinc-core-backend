@@ -219,6 +219,16 @@ class YAC_Auth_Controller extends YAC_REST_Controller {
             $data['password']
         );
 
+        if (is_wp_error($result)) {
+            $code = $result->get_error_code();
+
+            return $this->error(
+                $result->get_error_message(),
+                (int) ($result->get_error_data()['status'] ?? 400),
+                $code === 'yac_account_closed' ? $code : ''
+            );
+        }
+
         if (!$result) {
             return $this->error(
                 'Invalid email or password.',
@@ -240,9 +250,12 @@ class YAC_Auth_Controller extends YAC_REST_Controller {
         );
 
         if (is_wp_error($result)) {
+            $code = $result->get_error_code();
+
             return $this->error(
                 $result->get_error_message(),
-                (int) ($result->get_error_data()['status'] ?? 400)
+                (int) ($result->get_error_data()['status'] ?? 400),
+                $code === 'yac_google_account_closed' ? $code : ''
             );
         }
 

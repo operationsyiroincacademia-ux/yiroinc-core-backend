@@ -11,18 +11,23 @@ class YAC_Auth_Service {
      *
      * @param string $email
      * @param string $password
-     * @return array|false
+     * @return array|WP_Error|false
      */
     public static function login($email, $password) {
 
+        $email = sanitize_email((string) $email);
         $user = get_user_by('email', $email);
 
         if (!$user) {
+            if (YAC_Account_Deletion_Service::email_has_deleted_tombstone($email)) {
+                return self::closed_account_error();
+            }
+
             return false;
         }
 
         if (YAC_Account_Deletion_Service::is_deleted_user($user->ID)) {
-            return false;
+            return self::closed_account_error();
         }
 
         if (!wp_check_password($password, $user->user_pass, $user->ID)) {
@@ -67,6 +72,18 @@ class YAC_Auth_Service {
                 ],
             ],
         ];
+
+    }
+
+    private static function closed_account_error() {
+
+        return new WP_Error(
+            'yac_account_closed',
+            YAC_Account_Deletion_Service::CLOSED_ACCOUNT_LOGIN_MESSAGE,
+            [
+                'status' => 403,
+            ]
+        );
 
     }
 

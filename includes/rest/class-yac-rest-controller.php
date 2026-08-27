@@ -34,13 +34,19 @@ abstract class YAC_REST_Controller {
     /**
      * Error response.
      */
-    protected function error($message, $status = 400) {
+    protected function error($message, $status = 400, $code = '') {
+
+        $payload = [
+            'success' => false,
+            'message' => $message,
+        ];
+
+        if ($code !== '') {
+            $payload['code'] = $code;
+        }
 
         return new WP_REST_Response(
-            [
-                'success' => false,
-                'message' => $message,
-            ],
+            $payload,
             $status
         );
 

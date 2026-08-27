@@ -129,7 +129,11 @@ class YAC_Google_Auth_Service {
         }
 
         if (YAC_Account_Deletion_Service::is_deleted_user($user_id)) {
-            return self::error('yac_google_account_closed', 'This account has been closed.', 403);
+            return self::error(
+                'yac_google_account_closed',
+                YAC_Account_Deletion_Service::CLOSED_ACCOUNT_LOGIN_MESSAGE,
+                403
+            );
         }
 
         $profile = YAC_Profile_Service::get_by_user_id($user_id);
