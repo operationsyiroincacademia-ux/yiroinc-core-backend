@@ -50,10 +50,31 @@ class YAC_Auth_Helper {
         }
 
         return [
-            'id'    => $user->ID,
-            'email' => $user->user_email,
-            'name'  => $user->display_name,
+            'id'         => $user->ID,
+            'email'      => $user->user_email,
+            'name'       => $user->display_name,
+            'avatar_url' => self::avatar_url($user->ID),
         ];
+
+    }
+
+    /**
+     * Get stored account avatar URL.
+     *
+     * @param int $user_id
+     * @return string|null
+     */
+    public static function avatar_url($user_id) {
+
+        $avatar_url = (string) get_user_meta(
+            absint($user_id),
+            YAC_Google_Auth_Service::GOOGLE_PICTURE_META_KEY,
+            true
+        );
+
+        $avatar_url = esc_url_raw($avatar_url);
+
+        return $avatar_url !== '' ? $avatar_url : null;
 
     }
 

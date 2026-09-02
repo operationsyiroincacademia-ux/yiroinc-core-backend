@@ -7,6 +7,7 @@ if (!defined('ABSPATH')) {
 class YAC_Google_Auth_Service {
 
     const GOOGLE_SUB_META_KEY = 'yac_google_sub';
+    const GOOGLE_PICTURE_META_KEY = 'yac_google_picture_url';
 
     /**
      * Authenticate or register a customer with a verified Google ID token.
@@ -40,13 +41,13 @@ class YAC_Google_Auth_Service {
         }
 
         if ($linked_user_id) {
-            return self::authenticate_existing_customer((int) $linked_user_id, $sub, false);
+            return self::authenticate_existing_customer((int) $linked_user_id, $sub, false, $claims);
         }
 
         $email_user = get_user_by('email', $email);
 
         if ($email_user) {
-            return self::authenticate_existing_customer((int) $email_user->ID, $sub, true);
+            return self::authenticate_existing_customer((int) $email_user->ID, $sub, true, $claims);
         }
 
         if (empty($data['profile_type'])) {
@@ -118,11 +119,12 @@ class YAC_Google_Auth_Service {
             'given_name'  => sanitize_text_field((string) ($payload['given_name'] ?? '')),
             'family_name' => sanitize_text_field((string) ($payload['family_name'] ?? '')),
             'name'        => sanitize_text_field((string) ($payload['name'] ?? $email)),
+            'picture'     => esc_url_raw((string) ($payload['picture'] ?? '')),
         ];
 
     }
 
-    private static function authenticate_existing_customer($user_id, $sub, $link_google_sub) {
+    private static function authenticate_existing_customer($user_id, $sub, $link_google_sub, array $claims = []) {
 
         if (user_can($user_id, 'manage_options')) {
             return self::error('yac_google_admin_forbidden', 'Google authentication is not available for administrators.', 403);
@@ -159,6 +161,8 @@ class YAC_Google_Auth_Service {
                 }
             }
         }
+
+        self::maybe_update_google_picture($user_id, $claims);
 
         return self::auth_response($user_id, $profile);
 
@@ -210,7 +214,7 @@ class YAC_Google_Auth_Service {
         }
 
         if ($linked_user_id) {
-            return self::authenticate_existing_customer((int) $linked_user_id, $sub, false);
+            return self::authenticate_existing_customer((int) $linked_user_id, $sub, false, $claims);
         }
 
         if (get_user_by('email', $email)) {
@@ -258,6 +262,8 @@ class YAC_Google_Auth_Service {
             return self::error('yac_google_link_failed', 'Unable to link Google identity.', 500);
         }
 
+        self::maybe_update_google_picture($user_id, $claims);
+
         try {
             YAC_CRM_Service::sync_user($user_id);
             YAC_CRM_Service::apply_tag($user_id, $profile_type);
@@ -290,6 +296,7 @@ class YAC_Google_Auth_Service {
                 'id'            => $user->ID,
                 'name'          => $user->display_name,
                 'email'         => $user->user_email,
+                'avatar_url'    => YAC_Auth_Helper::avatar_url($user->ID),
                 'registered_at' => $user->user_registered,
                 'is_admin'      => 0,
                 'roles'         => array_values((array) $user->roles),
@@ -309,6 +316,18 @@ class YAC_Google_Auth_Service {
                 ],
             ],
         ];
+
+    }
+
+    private static function maybe_update_google_picture($user_id, array $claims) {
+
+        $picture = esc_url_raw((string) ($claims['picture'] ?? ''));
+
+        if ($picture === '') {
+            return;
+        }
+
+        update_user_meta(absint($user_id), self::GOOGLE_PICTURE_META_KEY, $picture);
 
     }
 
