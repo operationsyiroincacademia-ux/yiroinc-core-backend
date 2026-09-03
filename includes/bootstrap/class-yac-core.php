@@ -214,6 +214,7 @@ class YAC_Core {
 
         return [
             'http://localhost:8080',
+            'https://portal.yiroincacademia.com',
             'https://yiroincacademia.com',
             'https://www.yiroincacademia.com',
         ];
