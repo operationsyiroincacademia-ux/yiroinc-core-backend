@@ -20,6 +20,8 @@ require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-admin-invitations-table.php
 require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-resources-table.php';
 require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-resource-audiences-table.php';
 require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-resource-entitlements-table.php';
+require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-support-tickets-table.php';
+require_once YAC_PLUGIN_DIR . 'includes/db/class-yac-support-messages-table.php';
 
 
 
@@ -49,6 +51,8 @@ class YAC_Table_Registry {
             YAC_Resources_Table::class,
             YAC_Resource_Audiences_Table::class,
             YAC_Resource_Entitlements_Table::class,
+            YAC_Support_Tickets_Table::class,
+            YAC_Support_Messages_Table::class,
 
         ];
 

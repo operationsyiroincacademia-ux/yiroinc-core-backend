@@ -6,7 +6,7 @@ if (!defined('ABSPATH')) {
 
 class YAC_Database {
 
-    const DB_VERSION = '1.0.9';
+    const DB_VERSION = '1.0.10';
 
     public static function load() {
 

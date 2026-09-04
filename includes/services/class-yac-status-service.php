@@ -97,4 +97,35 @@ class YAC_Status_Service {
 
     }
 
+    /**
+     * Support ticket statuses.
+     */
+    public static function support_ticket_statuses() {
+
+        return [
+            'awaiting_admin',
+            'awaiting_user',
+            'resolved',
+        ];
+
+    }
+
+    /**
+     * Support ticket categories.
+     */
+    public static function support_ticket_categories() {
+
+        return [
+            'order',
+            'payment',
+            'tutoring',
+            'resource',
+            'account',
+            'consulting',
+            'procurement',
+            'other',
+        ];
+
+    }
+
 }

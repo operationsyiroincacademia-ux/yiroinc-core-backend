@@ -67,8 +67,9 @@ class YAC_Core {
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-admin-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-procurement-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-consulting-service.php';
+        require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-support-service.php';
         require_once YAC_PLUGIN_DIR . 'includes/services/class-yac-crm-service.php';
-        
+
 
         /*
          * REST
@@ -93,8 +94,8 @@ class YAC_Core {
         require_once YAC_PLUGIN_DIR . 'includes/rest/class-yac-dashboard-controller.php';
         require_once YAC_PLUGIN_DIR . 'includes/rest/class-yac-products-controller.php';
         require_once YAC_PLUGIN_DIR . 'includes/rest/class-yac-settings-controller.php';
-        
-        
+        require_once YAC_PLUGIN_DIR . 'includes/rest/class-yac-support-controller.php';
+
 
     }
 
@@ -119,6 +120,7 @@ class YAC_Core {
         (new YAC_Dashboard_Controller())->register_routes();
         (new YAC_Products_Controller())->register_routes();
         (new YAC_Settings_Controller())->register_routes();
+        (new YAC_Support_Controller())->register_routes();
 
     }
 

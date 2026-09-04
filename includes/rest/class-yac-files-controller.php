@@ -409,11 +409,13 @@ class YAC_Files_Controller extends YAC_REST_Controller {
         $is_admin = user_can($user_id, 'manage_options');
 
         $can_download_resource = $this->can_download_resource_file($file, $user_id);
+        $can_download_support_attachment = $this->can_download_support_attachment($file, $user_id);
 
         if (
             !$is_admin &&
             (int) $file['user_id'] !== (int) $user_id &&
-            !$can_download_resource
+            !$can_download_resource &&
+            !$can_download_support_attachment
         ) {
             return $this->error(
                 'You do not have permission to access this file.',
@@ -468,6 +470,16 @@ class YAC_Files_Controller extends YAC_REST_Controller {
             $file['id'],
             $user_id
         );
+
+    }
+
+    private function can_download_support_attachment($file, $user_id) {
+
+        if (!class_exists('YAC_Support_Service')) {
+            return false;
+        }
+
+        return YAC_Support_Service::can_download_attachment($file, $user_id);
 
     }
 

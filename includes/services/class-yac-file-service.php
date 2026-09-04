@@ -65,6 +65,15 @@ class YAC_File_Service {
             ];
         }
 
+        if ($context === 'support') {
+            return [
+                'jpg|jpeg' => 'image/jpeg',
+                'png'      => 'image/png',
+                'webp'     => 'image/webp',
+                'pdf'      => 'application/pdf',
+            ];
+        }
+
         return [
             'jpg|jpeg' => 'image/jpeg',
             'png'      => 'image/png',
