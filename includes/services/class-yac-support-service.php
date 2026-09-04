@@ -730,6 +730,7 @@ class YAC_Support_Service extends YAC_Base_Service {
 
         $formatted = [
             'id'              => (int) $ticket['id'],
+            'ticket_number'   => '#' . str_pad((string) absint($ticket['id']), 6, '0', STR_PAD_LEFT),
             'user_id'         => (int) $ticket['user_id'],
             'subject'         => $ticket['subject'],
             'category'        => $ticket['category'],

@@ -176,23 +176,21 @@ class YAC_Support_Controller extends YAC_REST_Controller {
 
     public function resolve_ticket(WP_REST_Request $request) {
 
-        $result = YAC_Support_Service::resolve_ticket(
-            $request['id'],
-            YAC_Auth_Helper::user_id()
+        return $this->error(
+            'Support ticket status is managed by support.',
+            403,
+            'yac_support_status_admin_only'
         );
-
-        return $this->response_from_result($result);
 
     }
 
     public function reopen_ticket(WP_REST_Request $request) {
 
-        $result = YAC_Support_Service::reopen_ticket(
-            $request['id'],
-            YAC_Auth_Helper::user_id()
+        return $this->error(
+            'Support ticket status is managed by support.',
+            403,
+            'yac_support_status_admin_only'
         );
-
-        return $this->response_from_result($result);
 
     }
 
