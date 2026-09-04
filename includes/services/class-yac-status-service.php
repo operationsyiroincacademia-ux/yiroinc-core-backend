@@ -103,9 +103,21 @@ class YAC_Status_Service {
     public static function support_ticket_statuses() {
 
         return [
-            'awaiting_admin',
-            'awaiting_user',
+            'open',
             'resolved',
+        ];
+
+    }
+
+    /**
+     * Support ticket priorities.
+     */
+    public static function support_ticket_priorities() {
+
+        return [
+            'low',
+            'medium',
+            'high',
         ];
 
     }

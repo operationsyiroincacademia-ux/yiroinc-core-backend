@@ -34,7 +34,8 @@ class YAC_Support_Service extends YAC_Base_Service {
                 'user_id'         => $user_id,
                 'subject'         => $prepared['subject'],
                 'category'        => $prepared['category'],
-                'status'          => 'awaiting_admin',
+                'status'          => 'open',
+                'priority'        => $prepared['priority'],
                 'last_message_at' => $now,
                 'last_message_by' => $user_id,
             ]
@@ -61,7 +62,7 @@ class YAC_Support_Service extends YAC_Base_Service {
             'related_type' => self::RELATED_TYPE,
             'related_id'   => $ticket_id,
             'title'        => 'New Support Ticket',
-            'message'      => 'A new support ticket is awaiting reply.',
+            'message'      => 'A new support ticket is open.',
             'type'         => 'info',
             'action_url'   => '/admin/support/' . $ticket_id,
         ], $user_id);
@@ -128,7 +129,7 @@ class YAC_Support_Service extends YAC_Base_Service {
             return $attachment_result;
         }
 
-        $updated = self::update_ticket_after_message($ticket['id'], $user_id, 'awaiting_admin');
+        $updated = self::update_ticket_after_message($ticket['id'], $user_id);
 
         if (is_wp_error($updated)) {
             return $updated;
@@ -139,7 +140,7 @@ class YAC_Support_Service extends YAC_Base_Service {
             'related_type' => self::RELATED_TYPE,
             'related_id'   => $ticket['id'],
             'title'        => 'Support Ticket Reply',
-            'message'      => 'A support ticket is awaiting reply.',
+            'message'      => 'A support ticket has a new customer reply.',
             'type'         => 'info',
             'action_url'   => '/admin/support/' . $ticket['id'],
         ], $user_id);
@@ -171,7 +172,7 @@ class YAC_Support_Service extends YAC_Base_Service {
             return self::error('yac_support_ticket_not_found', 'Support ticket not found.', 404);
         }
 
-        return self::change_status($ticket['id'], 'awaiting_admin', absint($user_id), false);
+        return self::change_status($ticket['id'], 'open', absint($user_id), false);
 
     }
 
@@ -229,7 +230,7 @@ class YAC_Support_Service extends YAC_Base_Service {
             return $attachment_result;
         }
 
-        $updated = self::update_ticket_after_message($ticket['id'], $admin_id, 'awaiting_user');
+        $updated = self::update_ticket_after_message($ticket['id'], $admin_id);
 
         if (is_wp_error($updated)) {
             return $updated;
@@ -304,6 +305,7 @@ class YAC_Support_Service extends YAC_Base_Service {
 
         $subject = sanitize_text_field($data['subject'] ?? '');
         $category = sanitize_key($data['category'] ?? '');
+        $priority = sanitize_key($data['priority'] ?? 'medium');
 
         if ($subject === '') {
             return self::error('yac_support_subject_required', 'subject is required.', 400);
@@ -321,9 +323,14 @@ class YAC_Support_Service extends YAC_Base_Service {
             return self::error('yac_invalid_support_category', 'Invalid support ticket category.', 422);
         }
 
+        if (!in_array($priority, YAC_Status_Service::support_ticket_priorities(), true)) {
+            return self::error('yac_invalid_support_priority', 'Invalid support ticket priority.', 422);
+        }
+
         return [
             'subject'  => $subject,
             'category' => $category,
+            'priority' => $priority,
         ];
 
     }
@@ -416,14 +423,13 @@ class YAC_Support_Service extends YAC_Base_Service {
 
     }
 
-    private static function update_ticket_after_message($ticket_id, $sender_user_id, $status) {
+    private static function update_ticket_after_message($ticket_id, $sender_user_id) {
 
         global $wpdb;
 
         $updated = $wpdb->update(
             YAC_Support_Tickets_Table::table_name(),
             [
-                'status'          => $status,
                 'last_message_at' => current_time('mysql'),
                 'last_message_by' => absint($sender_user_id),
             ],
@@ -431,7 +437,6 @@ class YAC_Support_Service extends YAC_Base_Service {
                 'id' => absint($ticket_id),
             ],
             [
-                '%s',
                 '%s',
                 '%d',
             ],
@@ -511,15 +516,19 @@ class YAC_Support_Service extends YAC_Base_Service {
             $params[] = absint($args['user_id']);
         }
 
-        $status = isset($args['status']) ? sanitize_key($args['status']) : '';
+        $status = isset($args['status']) ? self::normalize_status($args['status']) : '';
 
         if ($status !== '') {
             if (!in_array($status, YAC_Status_Service::support_ticket_statuses(), true)) {
                 return self::error('yac_invalid_support_status', 'Invalid support ticket status.', 422);
             }
 
-            $where[] = 't.status = %s';
-            $params[] = $status;
+            if ($status === 'open') {
+                $where[] = "t.status IN ('open', 'awaiting_admin', 'awaiting_user')";
+            } else {
+                $where[] = 't.status = %s';
+                $params[] = $status;
+            }
         }
 
         $category = isset($args['category']) ? sanitize_key($args['category']) : '';
@@ -724,7 +733,8 @@ class YAC_Support_Service extends YAC_Base_Service {
             'user_id'         => (int) $ticket['user_id'],
             'subject'         => $ticket['subject'],
             'category'        => $ticket['category'],
-            'status'          => $ticket['status'],
+            'status'          => self::normalize_status($ticket['status'] ?? 'open'),
+            'priority'        => self::normalize_priority($ticket['priority'] ?? 'medium'),
             'last_message_at' => $ticket['last_message_at'],
             'last_message_by' => !empty($ticket['last_message_by']) ? (int) $ticket['last_message_by'] : null,
             'resolved_by'     => !empty($ticket['resolved_by']) ? (int) $ticket['resolved_by'] : null,
@@ -738,6 +748,30 @@ class YAC_Support_Service extends YAC_Base_Service {
         }
 
         return $formatted;
+
+    }
+
+    private static function normalize_status($status) {
+
+        $status = sanitize_key($status);
+
+        if (in_array($status, ['awaiting_admin', 'awaiting_user'], true)) {
+            return 'open';
+        }
+
+        return $status ?: 'open';
+
+    }
+
+    private static function normalize_priority($priority) {
+
+        $priority = sanitize_key($priority);
+
+        if (!in_array($priority, YAC_Status_Service::support_ticket_priorities(), true)) {
+            return 'medium';
+        }
+
+        return $priority;
 
     }
 

@@ -23,7 +23,9 @@ class YAC_Support_Tickets_Table extends YAC_Table {
 
             category VARCHAR(100) NOT NULL,
 
-            status VARCHAR(30) NOT NULL DEFAULT 'awaiting_admin',
+            status VARCHAR(30) NOT NULL DEFAULT 'open',
+
+            priority VARCHAR(20) NOT NULL DEFAULT 'medium',
 
             last_message_at DATETIME NOT NULL,
 
@@ -46,11 +48,35 @@ class YAC_Support_Tickets_Table extends YAC_Table {
 
             KEY category (category),
 
+            KEY priority (priority),
+
             KEY last_message_at (last_message_at)
 
         ) {$charset_collate};";
 
         self::run_dbdelta($sql);
+
+        self::normalize_legacy_rows();
+
+    }
+
+    private static function normalize_legacy_rows() {
+
+        global $wpdb;
+
+        $table_name = self::table_name();
+
+        $wpdb->query(
+            "UPDATE {$table_name}
+             SET status = 'open'
+             WHERE status IN ('awaiting_admin', 'awaiting_user')"
+        );
+
+        $wpdb->query(
+            "UPDATE {$table_name}
+             SET priority = 'medium'
+             WHERE priority IS NULL OR priority = ''"
+        );
 
     }
 }
