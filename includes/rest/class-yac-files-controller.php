@@ -423,9 +423,11 @@ class YAC_Files_Controller extends YAC_REST_Controller {
             );
         }
 
+        $file_path = $file['file_path'];
+
         if (
-            empty($file['file_path']) ||
-            !file_exists($file['file_path'])
+            empty($file_path) ||
+            !file_exists($file_path)
         ) {
             return $this->error(
                 'File is missing from the server.',
@@ -433,8 +435,30 @@ class YAC_Files_Controller extends YAC_REST_Controller {
             );
         }
 
+        if (!is_readable($file_path)) {
+            return $this->error(
+                'File is not readable on the server.',
+                500
+            );
+        }
+
+        $file_size = filesize($file_path);
+
+        if ($file_size === false || $file_size <= 0) {
+            return $this->error(
+                'File is empty or unavailable on the server.',
+                500
+            );
+        }
+
         if (class_exists('YAC_Core')) {
             YAC_Core::send_allowed_cors_headers();
+        }
+
+        while (ob_get_level() > 0) {
+            if (!@ob_end_clean()) {
+                break;
+            }
         }
 
         header('Content-Type: ' . $file['mime_type']);
@@ -447,12 +471,17 @@ class YAC_Files_Controller extends YAC_REST_Controller {
 
         header(
             'Content-Length: ' .
-            filesize($file['file_path'])
+            $file_size
         );
 
         header('X-Content-Type-Options: nosniff');
 
-        readfile($file['file_path']);
+        $bytes_sent = readfile($file_path);
+
+        if ($bytes_sent === false) {
+            error_log('YAC file download failed for file ID ' . (int) $file_id);
+        }
+
         exit;
 
     }
