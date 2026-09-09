@@ -417,10 +417,7 @@ class YAC_Files_Controller extends YAC_REST_Controller {
             !$can_download_resource &&
             !$can_download_support_attachment
         ) {
-            return $this->error(
-                'You do not have permission to access this file.',
-                403
-            );
+            return $this->error('File not found.', 404);
         }
 
         $file_path = $file['file_path'];
