@@ -57,3 +57,8 @@ function yac_run_plugin() {
 }
 
 yac_run_plugin();
+
+if (defined('WP_CLI') && WP_CLI) {
+    require_once YAC_PLUGIN_DIR . 'includes/cli/class-yac-file-migration-command.php';
+    WP_CLI::add_command('yac migrate-private-files', 'YAC_File_Migration_Command');
+}
